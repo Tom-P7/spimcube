@@ -22,7 +22,7 @@ class Spim:
     Example:
     -------
     
-    >> path     = "/Users/pelini/L2C/Manip uPL UV 3K/Data/Spectre image/Edgar KSU/C27/"
+    >> path     = "/my/path/to/my/data/"
     >> filename = "SPI_C27_004K_370uW_5x1s_30x30um_1800gr_slit20_310nm_221018a"
     
     >> spim = Spim(path, filename)
@@ -209,7 +209,7 @@ class SpimInterface:
     -------
     # One first has to create an object ```Spim`` to be epxplored.
 
-    >> path     = "/Users/pelini/L2C/Manip uPL UV 3K/Data/Spectre image/Edgar KSU/C27/"
+    >> path     = "/my/path/to/my/data/"
     >> filename = "SPI_C27_004K_370uW_5x1s_30x30um_1800gr_slit20_310nm_221018a"
     
     >> spim = Spim(path, filename)
