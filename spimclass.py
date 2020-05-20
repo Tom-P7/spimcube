@@ -7,7 +7,7 @@ import colorcet as cc
 import copy
 import statistics as stat
 
-from MyPackage import functions as fct
+import functions as fct
 
 
 
