@@ -1,9 +1,8 @@
 from setuptools import setup
 
-setup(name='spimexplore',
+setup(name='mexlorpires',
       version='1.0',
       description='Datacube exploration',
-      author='Thomas Pelini',
-      author_email='thomas.pelini@lncmi.cnrs.fr',
-      packages=['MyPackage'],
+      author='Tom-P',
+      packages=['spimclass', 'functions'],
       zip_safe=False)
