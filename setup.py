@@ -5,4 +5,5 @@ setup(name='mexlorpires',
       description='Datacube exploration',
       author='Tom-P',
       packages=['spimclass', 'functions'],
-      zip_safe=False)
+      install_requires=["matplotlib>=3.1", "colorcet"]
+      description="This is a package enabling the exploration of datacube of spectra within a rich GUI interface.")
