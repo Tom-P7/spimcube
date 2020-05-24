@@ -2,7 +2,7 @@ import math as math
 import numpy as np
 import re
 
-from MyPackage import functions as fct
+import functions as fct
 
 def initialization(path, basename):
     """Return a dictionary with: NStepsX, NStepsY, Npixel, Matrix, tab_of_lambda, Xstep, Ystep, Xrange, Yrange."""
