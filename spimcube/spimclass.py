@@ -7,7 +7,7 @@ import colorcet as cc
 import copy
 import statistics as stat
 
-import functions as fct
+import spimcube.functions as fct
 
 
 
