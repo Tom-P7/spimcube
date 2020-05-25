@@ -7,7 +7,7 @@ setup(
       license='MIT',
       download_url='https://github.com/Tom-P7/spimcube/archive/v_1.0.tar.gz',
       
-      install_requires=['matplotlib>=3.1', 'colorcet', 'numpy'],
+      install_requires=['matplotlib>=3.1', 'colorcet', 'numpy', 'despike'],
       
       author="Tom-P7",
       description="This package enables the exploration of datacube of spectra within a rich GUI interface.",
