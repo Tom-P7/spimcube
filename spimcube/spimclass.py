@@ -206,7 +206,7 @@ class Spim:
             self.xpmin, self.xpmax = [0, 0], [len(self.x_range)-1, self.x_range[-1]]
             self.ypmin, self.ypmax = [0, 0], [len(self.y_range)-1, self.y_range[-1]]
         
-    def intensity_map(self, center=None, width=None, clean_spike=self.clean_spike):
+    def intensity_map(self, center=None, width=None):
         """Builds the intensity image data in the desired spectral range.
         
         Generate a 2D array contening intensity of the PL integrated over the chosen range in wavelength.
@@ -227,7 +227,7 @@ class Spim:
                         self.int_lambda_min[0]:self.int_lambda_max[0]+1],
             axis=2,
         )
-        if clean_spike:
+        if self.clean_spike:
             # Clean the image from the spikes.
             image_data = despike.clean(image_data)
         return image_data / np.max(image_data)
