@@ -6,7 +6,7 @@ import re
 import colorcet as cc
 import copy
 import statistics as stat
-
+import despike
 import spimcube.functions as fct
 
 
