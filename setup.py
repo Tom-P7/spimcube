@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
       name='spimcube',
-      version='1.3',
+      version='1.3.1',
       packages=['spimcube'],
       license='MIT',
       
