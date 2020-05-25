@@ -6,7 +6,7 @@ import re
 import colorcet as cc
 import copy
 import statistics as stat
-
+import despike
 import spimcube.functions as fct
 
 
@@ -42,7 +42,7 @@ class Spim:
     -------
 
     """
-    def __init__(self, path, filename, scan_direction='hl'):
+    def __init__(self, path, filename, scan_direction='hl', clean_spike=False):
 
         """
         Parameters
@@ -52,11 +52,15 @@ class Spim:
                          Example: 'hl' means scanning by successive horizontal lines from left to right.
                                   'vt' means scanning by successive vertical lines from top to bottom.
                          Default is 'hl'.
+        clean_spike : bool (default : False)
+                      If True, the method ``intensity_map`` returns an image after cleaning the spikes with
+                      ``despike.clean``.
                          
         """
         self.path = path
         self.filename = filename
         self.scan_direction = scan_direction
+        self.clean_spike = clean_spike
         
         # Data attributes
         self.matrix = None
@@ -202,7 +206,7 @@ class Spim:
             self.xpmin, self.xpmax = [0, 0], [len(self.x_range)-1, self.x_range[-1]]
             self.ypmin, self.ypmax = [0, 0], [len(self.y_range)-1, self.y_range[-1]]
         
-    def intensity_map(self, center=None, width=None):
+    def intensity_map(self, center=None, width=None, clean_spike=self.clean_spike):
         """Builds the intensity image data in the desired spectral range.
         
         Generate a 2D array contening intensity of the PL integrated over the chosen range in wavelength.
@@ -223,6 +227,9 @@ class Spim:
                         self.int_lambda_min[0]:self.int_lambda_max[0]+1],
             axis=2,
         )
+        if clean_spike:
+            # Clean the image from the spikes.
+            image_data = despike.clean(image_data)
         return image_data / np.max(image_data)
 
 
@@ -257,7 +264,7 @@ class SpimInterface:
     -------
     
     """
-    def __init__(self, spim, lambda_init=None):
+    def __init__(self, spim, lambda_init=None, fig_fc='dimgrey', spec_fc='whitesmoke'):
         """
         Parameters
         ----------
@@ -287,8 +294,8 @@ class SpimInterface:
         vsp1, vsp2 = 0.03, 0.015
         
         # Figure and main axes - attributes
-        self.fig = plt.figure(figsize=(14, 6.54), facecolor='dimgrey')
-        self.ax_spectrum  = self.fig.add_axes([l1, b0, w0, h0], facecolor='whitesmoke')
+        self.fig = plt.figure(figsize=(14, 6.54), facecolor=fig_fc)
+        self.ax_spectrum  = self.fig.add_axes([l1, b0, w0, h0], facecolor=spec_fc)
         for spine in self.ax_spectrum.spines.values():
             spine.set_lw(1.7)
             spine.set_color('k')#'dimgrey'
