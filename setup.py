@@ -1,20 +1,9 @@
 from setuptools import setup
 
-setup(
-      name='spimcube',
+setup(name='indev',
       version='1.3.1',
-      packages=['spimcube'],
-      license='MIT',
-      
-      #download_url='https://github.com/Tom-P7/spimcube/archive/v_1.0.tar.gz',
-      # --> Not needed anymore
-      
-      install_requires=['matplotlib>=3.1', 'colorcet', 'numpy', 'despike'],
-      
-      author="Tom-P7",
-      description="This package enables the exploration of datacube of spectra within a rich GUI interface.",
-      keywords=['spim', 'datacube', 'hyperspectral'],
-      url='https://github.com/Tom-P7/spimcube',
-      
-      zip_safe=False,
-)
+      description='My classes and functions',
+      author='Thomas Pelini',
+      author_email='thomas.pelini@lncmi.cnrs.fr',
+      packages=['indev'],
+      zip_safe=False)
