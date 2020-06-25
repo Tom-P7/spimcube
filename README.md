@@ -9,12 +9,18 @@
 The package has three modules:
 
 - ``spimclass`` containing the main objects implemented in the package, i.e ``Spim`` and ``SpimInterface``.
-- ``functions`` mostly functions used internally in the class defined in ``spimclass``.
+- ``functions`` mostly functions used internally in the classes defined in ``spimclass``.
 - ``procedures``, included for personal purposes.
 
 ##### ``Spim`` object
 
-Object used to initialize the set of data. It has multiple initialization method depending on the user raw data.
+Object used to initialize the set of data. It has multiple initialization methods depending on the user raw data.
+It possesses methods allowing for diverse kind of map plot: the default one being "spectrally filtered spatial image" with the method ``intensity_map``.
+
+##### ``SpimInterface`` object
+
+Object that implement the GUI.
+It is conceived in such a way that if the user identifies interesting data points or ROI within the GUI, he can easily switch to command line interface (CLI) to manipulate those. Actually, this GUI is thought as an exploration tool for datacube before going to more thorough analysis through classical CLI.
 
 ### Installation and upgrade
 
