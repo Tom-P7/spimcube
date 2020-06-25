@@ -6,6 +6,16 @@
 
 > Currently, the GUI is designed for datacubes obtained from a spatial mapping where a spectrum is recorded at each pixel of the map. But **in futur releases**, there will be **tools to explore general datacube** where each dimension can be: time, magnetic field, temperature, etc.
 
+The package has three modules:
+
+- ``spimclass`` containing the main objects implemented in the package, i.e ``Spim`` and ``SpimInterface``.
+- ``functions`` mostly functions used internally in the class defined in ``spimclass``.
+- ``procedures``, included for personal purposes.
+
+##### ``Spim`` object
+
+Object used to initialize the set of data. It has multiple initialization method depending on the user raw data.
+
 ### Installation and upgrade
 
 To install ``spimcube`` simply type in your terminal: 
