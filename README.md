@@ -1,5 +1,7 @@
 # Spimcube
 
+[![N|Solid](https://cldup.com/dTxpPi9lDf.thumb.png)](https://nodesource.com/products/nsolid)
+
 ``spimcube`` provides a graphical user interface (GUI) coded with ``matplotlib`` to explore datacube of spectra, in other words, tridimensional set of data containing spectra.
 
 > Currently, the GUI is designed for datacubes obtained from a spatial mapping where a spectrum is recorded at each pixel of the map. But **in futur releases**, there will be **tools to explore general datacube** where each dimension can be: time, magnetic field, temperature, etc.
