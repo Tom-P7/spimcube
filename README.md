@@ -10,7 +10,7 @@ The package has three modules:
 
 - ``spimclass`` containing the main objects implemented in the package, i.e ``Spim`` and ``SpimInterface``.
 - ``functions`` mostly functions used internally in the classes defined in ``spimclass``.
-- ``procedures``, included for personal purposes.
+- ``procedures`` included for personal purposes.
 
 ##### ``Spim`` object
 
