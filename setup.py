@@ -8,7 +8,7 @@ setup(name='spimcube',
       description="This package enables the exploration of datacube of spectra within a rich GUI interface.",
       keywords=['spim', 'datacube', 'hyperspectral, 3D map'],
       long_description=long_description,
-      long_description_content_type="text/markdown"
+      long_description_content_type="text/markdown",
       url="https://github.com/Tom-P7/spimcube",
       
       author='Thomas Pelini',
@@ -22,6 +22,6 @@ setup(name='spimcube',
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
-        ]
+        ],
       zip_safe=False,
 )
