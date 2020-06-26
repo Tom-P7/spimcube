@@ -8,7 +8,7 @@ import numpy as np
 import statistics as stat
 
 import despike
-import indev.functions as fct
+import spimcube.functions as fct
 
 
 class Spim:
