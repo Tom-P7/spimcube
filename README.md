@@ -43,10 +43,14 @@ $ pip install --upgrade spimcube
  - Make the code more flexible so it can handle unfinished map.
 
 
-### License
+### Meta
+
+Thomas Pelini - thomas.pelini@orange.fr
 
 This project is licensed under the terms of the [MIT license][MITLicense].
 
 [//]: # (These are reference links used in the body of this note and get stripped out when the markdown processor does its job. There is no need to format nicely because it shouldn't be seen. Thanks SO - http://stackoverflow.com/questions/4823468/store-comments-in-markdown-syntax)
+
+https://github.com/Tom-P7/spimcube
 
 [MITLicense]: <https://github.com/Tom-P7/spimcube/blob/master/LICENSE>
