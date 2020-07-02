@@ -38,7 +38,7 @@ $ pip install --upgrade spimcube
 
 ### Todos
 
- - Implement a method to remove spikes from the raw data. Actually only ``despike.clean`` is used for the display but it is slow. ``remove_spikes`` is on his way!
+ - Implement a method to remove spikes from the raw data. Currently only ``despike.clean`` is used for the display but it is slow. ``remove_spikes`` is on his way!
  - Implement regex formulae to read the correct parameters for initialization of ``Spim`` object directly from the file name or from file containing metadata.
  - Make the code more flexible so it can handle unfinished map.
 
