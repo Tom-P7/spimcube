@@ -96,8 +96,8 @@ si.ax_spectrum.set_facecolor('blue')
 
 ### Todos
 
- - Implement a method to remove spikes from the raw data. Currently only ``despike.clean`` is used for the display but it is slow. ``remove_spikes`` is on his way!
- - Implement regex formulae to read the correct parameters for initialization of ``Spim`` object directly from the file name or from file containing metadata.
+ - Implement a method to remove spikes from the raw data. Currently only ``despike.clean`` is used for the display but is slow. ``remove_spikes`` is on his way!
+ - Implement regex formulae to read the correct parameters for initialization of ``Spim`` object directly from the filename or from file containing metadata.
 
 
 ### Meta
