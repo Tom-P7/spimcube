@@ -37,10 +37,20 @@ $ pip install --upgrade spimcube
 
 ### Example of use
 
-The tools present in `spimcube`
+The tools present in `spimcube` ``spimcube`` ```spimcube```
 Start by importing the tools:
 
 ```sh
+$ from spimcube.spimclass import (Spim, SpimInterface)
+```
+
+Depending on the default backend on your system, you may need to use the magic command matplotlib available through ipython (either on terminal or jupyter notebook):
+```sh
+$ %matplotlib
+```
+
+which will allows for interactive windows.
+
 
 
 ### Todos
