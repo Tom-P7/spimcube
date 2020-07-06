@@ -165,7 +165,7 @@ def remove_spikes(array, window_size=10, threshold=200):
 def nm_eV(*args, decimals=5):
     """Return the converted energy from nm to eV or from eV to nm.
 
-    None: scalars, list and numpy array can be passed to the function but only one type at a time.
+    Note: scalars, list and numpy array can be passed to the function but only one type at a time.
     Example: nm_eV(234.6, 1.75, 1.34)
              nm_eV([233, 1.37, 1.39])
              nm_eV(np.array([666, 665, 664]))
