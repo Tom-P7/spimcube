@@ -52,7 +52,7 @@ Then, you may proceed as follows (presented below is the simplest case of use of
 
 ```sh
 
-# If you are on UNIX OS (Mac, Linux):
+# If you are on UNIX OS (MacOS, Linux, etc.):
 path = "/my/path/to/my/folder/"
 filename = "name_of_the_file"
 
