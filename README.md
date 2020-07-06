@@ -51,8 +51,15 @@ which will allows for interactive windows.
 Then, you may proceed as follows (presented below is the simplest case of use of the tools, with no options):
 
 ```sh
+
+# If you are on UNIX OS:
 path = "/my/path/to/my/folder/"
 filename = "name_of_the_file"
+
+# If you are on Windows OS:
+path = "C:\\my\\path\\to\\my\\folder\\"   # Don't forget the double backslash, otherwise python interpret '\' as an escape character.
+filename = "name_of_the_file"
+
 
 spim = Spim(path, filename)
 spim.initialization_textfile()
@@ -63,7 +70,7 @@ Here, note that there exist different "initialization" methods. You can check th
 dir(Spim)
 ```
 
-Alternatively, a coordinate file can be used, which will additionaly plot a grid of the scanned pixel positions:
+Alternatively, a coordinate file can be used, which will additionaly plot a grid of the scanned positions:
 ```sh
 spim.define_space_range(coordinate_file="/my/path/filename.txt")
 
@@ -85,7 +92,7 @@ si.image.set_cmap('viridis')
 si.ax_spectrum.set_facecolor('blue')
 ```
 
-> Check the docstring of each object and functions to see the numerous options available.
+> Check the docstring of each object and methods to see the numerous options available.
 
 ### Todos
 
