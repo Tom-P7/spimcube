@@ -37,21 +37,56 @@ $ pip install --upgrade spimcube
 
 ### Example of use
 
-The tools present in `spimcube` ``spimcube`` ```spimcube```
 Start by importing the tools:
-
 ```sh
 $ from spimcube.spimclass import (Spim, SpimInterface)
 ```
 
-Depending on the default backend on your system, you may need to use the magic command matplotlib available through ipython (either on terminal or jupyter notebook):
+Depending on the default backend on your system, you may need to use the magic command ``%matplotlib`` available through ipython (either on terminal or jupyter notebook). Just type:
 ```sh
 $ %matplotlib
 ```
-
 which will allows for interactive windows.
 
+And then you may proceed as follows (presented below is the simplest case of use of the tools, with no options):
 
+```sh
+path = "/my/path/to/my/folder/"
+filename = "name_of_the_file"
+
+spim = Spim(path, filename)
+spim.initialization_textfile()
+```
+Here note that there exist different "initialization" methods. You can check those by typing:
+
+```sh
+dir(Spim)
+```
+
+Alternatively, a coordinate file can be used, which will additionaly plot a grid of the scanned pixel positions.
+```sh
+spim.define_space_range(coordinate_file="/my/path/filename.txt")
+```
+
+Or ``define_space_range`` can be used to plot only a restricted ROI:
+```sh
+spim.define_space_range(area=(12, 24, 5, 17)). # In micrometers.
+```
+
+Finally, the spim can be explored with the GUI:
+
+```sh
+si = SpimInterface(spim)
+```
+
+Esthetics of plots can be controlled by normal attribute access:
+```sh
+si.image.set_interpolation('spline16')
+si.image.set_cmap('viridis')
+si.ax_spectrum.set_facecolor('blue')
+```
+
+> Check the docstring of each object and functions to see the numerous options available.
 
 ### Todos
 
