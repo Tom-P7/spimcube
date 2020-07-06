@@ -75,7 +75,7 @@ Alternatively, a coordinate file can be used, which will additionaly plot a grid
 spim.define_space_range(coordinate_file="/my/path/filename.txt")
 
 # Also, ``define_space_range`` can be used to plot only a restricted ROI:
-spim.define_space_range(area=(12, 24, 5, 17)). # In micrometers.
+spim.define_space_range(area=(12, 24, 5, 17))  # In micrometers.
 
 ```
 
@@ -98,7 +98,6 @@ si.ax_spectrum.set_facecolor('blue')
 
  - Implement a method to remove spikes from the raw data. Currently only ``despike.clean`` is used for the display but it is slow. ``remove_spikes`` is on his way!
  - Implement regex formulae to read the correct parameters for initialization of ``Spim`` object directly from the file name or from file containing metadata.
- - Make the code more flexible so it can handle unfinished map.
 
 
 ### Meta
