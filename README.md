@@ -48,7 +48,7 @@ $ %matplotlib
 ```
 which will allows for interactive windows.
 
-And then you may proceed as follows (presented below is the simplest case of use of the tools, with no options):
+Then, you may proceed as follows (presented below is the simplest case of use of the tools, with no options):
 
 ```sh
 path = "/my/path/to/my/folder/"
@@ -57,20 +57,19 @@ filename = "name_of_the_file"
 spim = Spim(path, filename)
 spim.initialization_textfile()
 ```
-Here note that there exist different "initialization" methods. You can check those by typing:
+Here, note that there exist different "initialization" methods. You can check those by typing:
 
 ```sh
 dir(Spim)
 ```
 
-Alternatively, a coordinate file can be used, which will additionaly plot a grid of the scanned pixel positions.
+Alternatively, a coordinate file can be used, which will additionaly plot a grid of the scanned pixel positions:
 ```sh
 spim.define_space_range(coordinate_file="/my/path/filename.txt")
-```
 
-Or ``define_space_range`` can be used to plot only a restricted ROI:
-```sh
+# Also, ``define_space_range`` can be used to plot only a restricted ROI:
 spim.define_space_range(area=(12, 24, 5, 17)). # In micrometers.
+
 ```
 
 Finally, the spim can be explored with the GUI:
