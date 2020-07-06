@@ -31,9 +31,9 @@ class Spim:
     >> filename = "SPIM_hBN_4K_e266nm_100uW_5x1s_30x50steps_2x2size_slit20_1800gr_c310nm_200621a"
 
     >> spim = Spim(path, filename)
-    >> spim.initialization()
+    >> spim.initialization_textfile()
     
-    # Alternatively, a coordinate file can be used, which will additionaly plot a grid of the scanned pixel positions.
+    # Alternatively, a coordinate file can be used, which will additionaly plot a grid of the scanned positions.
     >> spim.define_space_range(coordinate_file="/my/path/filename.txt")
     # Or ``define_space_range`` can be used to plot only a restricted ROI.
     >> spim.define_space_range(area=(12, 24, 5, 17))
@@ -46,14 +46,14 @@ class Spim:
 
     """
 
-    def __init__(self, path, filename, clean_spike=False, scan_direction='h', zigzag=False, scan_unit='nm'):
+    def __init__(self, path, filename, clean_spike=False, scan_direction='h', zigzag=False, scan_unit='step'):
 
         """
         Parameters
         ----------
         clean_spike : bool (default : False)
             If True, the method ``intensity_map`` returns an image after cleaning the spikes with
-            ``despike.clean``. Beware!!! This slow down the interaction with the image by a factor 450.
+            ``despike.clean``. BEWARE!!! This slows down the interaction with the image by a factor 450.
                       
         scan_direction : one of ('hlb'='hl'='h', 'hrb'='hr', 'hlt', 'hrt', 'vtl'='vt'='v', 'vbl'='vb', 'vtr', vbr').
             Default is 'hlb'.
@@ -71,7 +71,7 @@ class Spim:
         zigzag : bool. Indicates whether the scan is performed in zigzag mode or not. Default: False.
 
         scan_unit : str. Define the unit of the step in the scan.
-            Example: 'nm' is the default, it can also be piezo stepper step, which are not equal to nanometer.
+            Example: 'µm' is the default, it can also be piezo stepper step, which are not equal to micrometer.
         
         """
         self.path = path
@@ -87,10 +87,12 @@ class Spim:
         self.tab_lambda = None
 
         # Attributes of the initialization
+        self.start_x, self.start_y = 0, 0
         self.xstep_value, self.ystep_value = [None] * 2
         self.xstep_number, self.ystep_number = [None] * 2
         self.CCD_nb_pixel = None
         self.coordinate = None
+        self.z_coordinate = None
         self.x_range, self.y_range = [None] * 2
         self.xpmin, self.xpmax, self.ypmin, self.ypmax = [None] * 4
 
@@ -102,7 +104,80 @@ class Spim:
     # Initialization methods: each method is intended to extract and process a certain format of raw data.
     # Make a new one for each new format of data.
 
+    def initialization_qudi(self):
+        """Use this function to initialize the SPIM with compressed '.npz' file from Qudi - L2C.
+
+        Note: currently nothing is done with the z coordinates. It is only add to the attribute of the ``spim`` with
+        the same shaped numpy array as the x & y arrays.
+
+        """
+        complete_path = self.path + self.filename
+        data_file = complete_path + '.npz'
+        metadata_file = complete_path + '.dat'
+
+        self.scan_unit = 'step'
+
+        # Extract metadata.
+        with open(metadata_file, 'r') as file:
+            for line in file:
+                if line.startswith('#Data:'):
+                    break
+                if line.startswith('#start_x: '):
+                    start_x = line[10:line.find('\n')]
+                    self.start_x = round(float(start_x) * 1e6, 3)
+                if line.startswith('#start_y: '):
+                    start_y = line[10:line.find('\n')]
+                    self.start_y = round(float(start_y) * 1e6, 3)
+                if line.startswith('#step_x: '):
+                    step_x = line[9:line.find('\n')]
+                    self.xstep_value = round(float(step_x) * 1e6, 3)
+                if line.startswith('#step_y: '):
+                    step_y = line[9:line.find('\n')]
+                    self.ystep_value = round(float(step_y) * 1e6, 3)
+                if line.startswith('#shape: '):
+                    shape = line[8:line.find('\n')]
+                    shape = tuple(map(int, shape[1:-1].split(',')))
+                    self.xstep_number, self.ystep_number = shape[0], shape[1]
+                    self.CCD_nb_pixel = shape[2]
+
+        # Extract x, y and z coordinates.
+        file = np.load(data_file)
+        x = file.f.x * 1e6
+        y = file.f.y * 1e6
+        z = file.f.z * 1e6
+        x = x[:, np.newaxis]
+        y = y[:, np.newaxis]
+        coordinate = np.concatenate((x, y), axis=1)
+        # I reshape the z positions arbitrary as if the scan was horizontal (TO CORRECT)
+        self.z_coordinate = np.reshape(z, (self.ystep_number, self.xstep_number))
+
+        # Extract the list of wavelengths on the spectro CCD.
+        lambda_key = file.files[3:]
+        self.tab_lambda = np.array(list(map(lambda s: round(float(s) * 1e9, ndigits=3), lambda_key)))
+        if len(self.tab_lambda) != self.CCD_nb_pixel:
+            raise ValueError(
+                "The number of CCD pixels given in metadata does not match the number of wavelengths in data.")
+
+        # Extract the intensities.
+        data = []
+        for i, item in enumerate(file):
+            if i >= 3:
+                data.append(file[item])
+        file.close()
+        data = np.array(data)
+        data = data.T
+
+        # Check and fix incomplete scan.
+        data = self._fix_incomplete_scan(data)
+        self._shape3Dmatrix(data)
+
+        # Define default space range of the map.
+        self.define_space_range(coordinate=coordinate)
+
     def initialization(self):
+        """This void function is used to issue a deprecation warning."""
+        raise DeprecationWarning("This function name has changed, use ``initialization_labviewL2C`` instead.")
+    def initialization_labviewL2C(self):
         """Use this function to initialize the SPIM with binary datafile from L2C - Labview."""
         # Create the complete filenames with extension.
         complete_path = self.path + self.filename
@@ -110,16 +185,20 @@ class Spim:
         lambda_file = complete_path + ".lambda"
         init_file = complete_path + ".ini"
 
+        self.scan_unit = 'µm'
+
         # Load 'data' file, extract the first three values that are metadata and remove them.
         data = np.fromfile(data_file, dtype='>i4')
 
         self.xstep_number = data[0]
         self.ystep_number = data[1]
         self.CCD_nb_pixel = data[2]
-
         data = data[3:]
 
-        # Reshape the matrix
+        # Check and fix incomplete scan.
+        data = self._fix_incomplete_scan(data)
+
+        # Reshape the matrix.
         self._shape3Dmatrix(data)
 
         # Load Lambda file in float.
@@ -131,7 +210,7 @@ class Spim:
         self.xstep_value = fct.get_value("PasX", init_file)
         self.ystep_value = fct.get_value("PasY", init_file)
 
-        # Define default space range of the map
+        # Define default space range of the map.
         self.define_space_range()
 
     def initialization_textfile(self, xstep_number=None, ystep_number=None, xstep_value=None, ystep_value=None,
@@ -161,6 +240,8 @@ class Spim:
         """
         complete_path = self.path + self.filename + ".txt"
 
+        self.scan_unit = 'step'
+
         # Load data. ``column_1`` is wavelength, ``column_2`` is intensity.
         usecols = (0, 1) if not data_reversed else (1, 0)
         column_1, column_2 = np.loadtxt(complete_path, unpack=True, usecols=usecols)
@@ -176,7 +257,7 @@ class Spim:
 
         # Fetch metadata with regex.
         if not all([xstep_number, ystep_number]):
-            pattern = r"(\w*)x(\w*)" + 'steps'  # Specific to how we write the file name.
+            pattern = r"(\w*)x(\w*)" + 'steps'  # Specific to how we write the filename.
             values = re.findall(pattern, self.filename)
             if values:
                 self.xstep_number = int(values[0][0])
@@ -188,7 +269,7 @@ class Spim:
             self.ystep_number = ystep_number
 
         if not all([xstep_value, ystep_value]):
-            pattern = r"(\w*)x(\w*)" + 'mum'  # Specific to how we write the file name.
+            pattern = r"(\w*)x(\w*)" + 'mum'  # Specific to how we write the filename.
             values = re.findall(pattern, self.filename)
             if values:
                 self.xstep_value = int(values[0][0])
@@ -199,20 +280,23 @@ class Spim:
             self.xstep_value = xstep_value
             self.ystep_value = ystep_value
 
-        # Reshape the matrix
+        # Check and fix incomplete scan.
+        column_2 = self._fix_incomplete_scan(column_2)
+
+        # Reshape the matrix.
         self._shape3Dmatrix(column_2)
 
         # Create the tab of wavelengths.
         self.tab_lambda = column_1[0:self.CCD_nb_pixel]
 
-        # Define default space range of the map
+        # Define default space range of the map.
         self.define_space_range()
 
-    def define_space_range(self, area=None, coordinate_file=None):
+    def define_space_range(self, area=None, coordinate_file=None, coordinate=None):
         """Define the ROI in micrometer unit that is displayed.
 
         This function has nothing to do with the metadata of the scan, it only allows for ROI choice, for example
-        if only a small section of the scan is of interest. If no parameter is given, default to the entire scan.
+        if only a small section of the scan is of interest. If no parameter is given, default to the entire scan area.
         It generates the subsequent x & y scanned positions as well as the x & y min/max pixels positions.
         
         Parameters
@@ -222,15 +306,17 @@ class Spim:
                
         coordinate_file : the full filename (with the path) containing the scanned positions.
                           If provided, take  precedence on ``area``.
+
+        coordinate : the numpy array containing the x, y positions in the shape: (xstep_number*ystep_number, 2).
         
         """
-        if coordinate_file is None:
+        if coordinate_file is None and coordinate is None:
             self.coordinate = None
             # Generate X & Y 1D arrays of scanned positions.
-            self.x_range = np.linspace(self.xstep_value, self.xstep_value * self.xstep_number, self.xstep_number,
-                                       dtype='>f4')  # Builds 1D array of X positions
-            self.y_range = np.linspace(self.ystep_value, self.ystep_value * self.ystep_number, self.ystep_number,
-                                       dtype='>f4')  # and Y positions in ``scan_unit``.
+            self.x_range = np.linspace(self.start_x + self.xstep_value, self.xstep_value * self.xstep_number,
+                                       self.xstep_number, dtype='>f4')  # Builds 1D array of X positions
+            self.y_range = np.linspace(self.start_y + self.ystep_value, self.ystep_value * self.ystep_number,
+                                       self.ystep_number, dtype='>f4')  # and Y positions in ``scan_unit``.
             if area is None:
                 area = (0, self.x_range.max(), 0, self.y_range.max())
             space_area = area  # Define plot area in ``scan_unit`` unit: (xmin, xmax, ymin, ymax).
@@ -243,8 +329,10 @@ class Spim:
             self.xpmin, self.xpmax, self.ypmin, self.ypmax = pixel_area
 
         else:
-            # Get the matrix of coordinates.
-            coordinate = np.loadtxt(coordinate_file)
+            if coordinate is None:
+                # Get the matrix of coordinates.
+                coordinate = np.loadtxt(coordinate_file)
+            coordinate = self._fix_incomplete_coordinate(coordinate)
             self.coordinate = coordinate
             self._shape_coordinate(coordinate)
             # Generate X & Y 1D arrays of scanned pixels.
@@ -266,7 +354,7 @@ class Spim:
         width = 1 / 10 * (self.tab_lambda.max() - self.tab_lambda.min()) if width is None else width
         int_lambda_min = center - width / 2
         int_lambda_max = center + width / 2
-        #  The function ``find_nearest`` return the pixel number and the corresponding value in nm.
+        # The function ``find_nearest`` return the pixel number and the corresponding value in nm.
         self.int_lambda_min = fct.find_nearest(self.tab_lambda, int_lambda_min)
         self.int_lambda_max = fct.find_nearest(self.tab_lambda, int_lambda_max)
         # Integrate intensity over the chosen range of wavelength.
@@ -278,7 +366,61 @@ class Spim:
         if self.clean_spike:
             # Clean the image from the spikes.
             image_data = despike.clean(image_data)
+        #return image_data / np.max(image_data)
+        # The reason I changed the return array for the one below is because when there is a constant background
+        # then substracting the minimum value to all values allows for a more contrasted intensity image without the
+        # need to adjust the color limit sliders.
         return (image_data - np.min(image_data)) / (np.max(image_data) - np.min(image_data))
+
+    def _fix_incomplete_scan(self, array_to_fix):
+        """Check whether or not the input data is as large as expected and fix it if necessary.
+
+        - If the input data set is smaller than the expected size accordingly to ``xstep_number`` and ``xstep_number``,
+        then the data set is completed with zeros.
+        - If it is larger, a ValueErrror is raised.
+
+        array_to_fix : numpy array containing the data. The array is ravel so no need to do any reshaping before
+            passing it to this method.
+
+        """
+        expected_length = self.xstep_number * self.ystep_number * self.CCD_nb_pixel
+        array_to_fix = np.array(array_to_fix)
+
+        if len(array_to_fix.ravel()) > expected_length:
+            raise ValueError(
+                "The input data set is larger than the specified number of scan positions.\
+                Double-check ``xstep_number`` and ``xstep_number``.")
+        elif len(array_to_fix.ravel()) < expected_length:
+            delta_length = expected_length - len(array_to_fix.ravel())
+            patch_array = np.zeros(shape=delta_length)
+            array_fixed = np.concatenate((array_to_fix.ravel(), patch_array))
+            # warnings.warn("The data set was smaller than the specified number of scan positions. "
+            #              "It has been completed with zeros.")
+            print("INCOMPLETE SCAN, data set has been completed with zeros accordingly to the specified number "
+                  "of scan positions")
+            return array_fixed
+        else:
+            return array_to_fix
+
+    def _fix_incomplete_coordinate(self, array_to_fix):
+        expected_length = self.xstep_number * self.ystep_number * 2
+        array_to_fix = np.array(array_to_fix)
+
+        if len(array_to_fix.ravel()) > expected_length:
+            raise ValueError(
+                "The input data set is larger than the specified number of scan positions.\
+                Double-check ``xstep_number`` and ``xstep_number``.")
+        elif len(array_to_fix.ravel()) < expected_length:
+            delta_length = expected_length - len(array_to_fix.ravel())
+            patch_array = np.zeros(shape=delta_length)
+            array_fixed = np.concatenate((array_to_fix.ravel(), patch_array)).reshape((int(expected_length/2), 2))
+            # warnings.warn("The coordinate data set was smaller than the specified number of scan positions. "
+            #              "It has been completed with zeros.")
+            print("INCOMPLETE SCAN, data set has been completed with zeros accordingly to the specified number "
+                  "of scan positions")
+            return array_fixed
+        else:
+            return array_to_fix
 
     def _shape3Dmatrix(self, column_of_intensity):
         """Format the 3D matrix in desired dimensions.
@@ -289,31 +431,29 @@ class Spim:
         At the end, whatever the type of scan and direction, the matrix is formated as if it was a ``'hlb'`` scan.
 
         """
-        column = column_of_intensity
-
         if self.scan_direction in ['hlb', 'hl', 'h']:
-            self.matrix = column.reshape(self.ystep_number, self.xstep_number, self.CCD_nb_pixel)
+            self.matrix = column_of_intensity.reshape(self.ystep_number, self.xstep_number, self.CCD_nb_pixel)
             # No further transformation, this is the reference type of scan.
         elif self.scan_direction in ['hrb', 'hr']:
-            self.matrix = column.reshape(self.ystep_number, self.xstep_number, self.CCD_nb_pixel)
+            self.matrix = column_of_intensity.reshape(self.ystep_number, self.xstep_number, self.CCD_nb_pixel)
             self.matrix = np.flip(self.matrix, axis=1)
         elif self.scan_direction == 'hlt':
-            self.matrix = column.reshape(self.ystep_number, self.xstep_number, self.CCD_nb_pixel)
+            self.matrix = column_of_intensity.reshape(self.ystep_number, self.xstep_number, self.CCD_nb_pixel)
             self.matrix = np.flip(self.matrix, axis=0)
         elif self.scan_direction == 'hrt':
-            self.matrix = column.reshape(self.ystep_number, self.xstep_number, self.CCD_nb_pixel)
+            self.matrix = column_of_intensity.reshape(self.ystep_number, self.xstep_number, self.CCD_nb_pixel)
             self.matrix = np.flip(np.flip(self.matrix, axis=0), axis=1)
         elif self.scan_direction in ['vtl', 'vt', 'v']:
-            self.matrix = column.reshape(self.xstep_number, self.ystep_number, self.CCD_nb_pixel)
+            self.matrix = column_of_intensity.reshape(self.xstep_number, self.ystep_number, self.CCD_nb_pixel)
             self.matrix = np.flip(self.matrix, axis=1).transpose((1, 0, 2))
         elif self.scan_direction in ['vbl', 'vb']:
-            self.matrix = column.reshape(self.xstep_number, self.ystep_number, self.CCD_nb_pixel)
+            self.matrix = column_of_intensity.reshape(self.xstep_number, self.ystep_number, self.CCD_nb_pixel)
             self.matrix = self.matrix.transpose((1, 0, 2))
         elif self.scan_direction == 'vtr':
-            self.matrix = column.reshape(self.xstep_number, self.ystep_number, self.CCD_nb_pixel)
+            self.matrix = column_of_intensity.reshape(self.xstep_number, self.ystep_number, self.CCD_nb_pixel)
             self.matrix = np.flip(np.flip(self.matrix, axis=0), axis=1).transpose((1, 0, 2))
         elif self.scan_direction == 'vbr':
-            self.matrix = column.reshape(self.xstep_number, self.ystep_number, self.CCD_nb_pixel)
+            self.matrix = column_of_intensity.reshape(self.xstep_number, self.ystep_number, self.CCD_nb_pixel)
             self.matrix = np.flip(self.matrix, axis=0).transpose((1, 0, 2))
         else:
             raise ValueError(
@@ -392,12 +532,16 @@ class SpimInterface:
         """
         Parameters
         ----------
-        spim : the ``Spim`` object to be explored.
+        spim : the ``Spim`` datacube to be explored.
         
         lambda_init : Initial central wavelength to compute the intensity image.
                       If out of bound: set to the closest value.
                       If ``None``: most common intense pixel of the SPIM. If more than one are most common,
                       default to most common intense pixel of the first spectrum.
+
+        fig_fc : facecolor of the GUI.
+
+        spec_fc : facecolor of the spectrum window.
         
         """
         if lambda_init is None:
@@ -621,8 +765,8 @@ class SpimInterface:
             return title_pattern.format(idx1, idx2, str(self.spim.x_range[idx2]), str(self.spim.y_range[idx1]),
                                         self.scan_unit)
         else:
-            return title_pattern.format(idx1, idx2, str(self.spim.coordinate[idx1, idx2][0]),
-                                        str(self.spim.coordinate[idx1, idx2][1]), self.scan_unit)
+            return title_pattern.format(idx1, idx2, str(round(self.spim.coordinate[idx1, idx2][0], 3)),
+                                        str(round(self.spim.coordinate[idx1, idx2][1], 3)), self.scan_unit)
 
     def _update_image(self, _):
         """Update the image and spectrum markers when sliders 'center' or 'width' are changed."""

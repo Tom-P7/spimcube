@@ -10,6 +10,7 @@ import numpy as np
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks_cwt
 from scipy.special import erfc
+import scipy.constants
 import pandas as pd
 
 
@@ -162,7 +163,14 @@ def remove_spikes(array, window_size=10, threshold=200):
 #######################################################################################################################
 
 def nm_eV(*args, decimals=5):
-    """Return the converted energy from nm to eV or from eV to nm."""
+    """Return the converted energy from nm to eV or from eV to nm.
+
+    Note: scalars, list and numpy array can be passed to the function but only one type at a time.
+    Example: nm_eV(234.6, 1.75, 1.34)
+             nm_eV([233, 1.37, 1.39])
+             nm_eV(np.array([666, 665, 664]))
+             
+    """
     if len(args) == 1:
         value = np.array(args[0])
         return np.round(1239.84193 / value, decimals=decimals)
@@ -192,6 +200,17 @@ def delta_nm2eV(delta_nm, Lambda, decimals=3):
         return np.around(np.abs(1000 * 1239.84193 * delta_nm / Lambda ** 2), decimals=decimals)
     else:
         return round(abs(1000 * 1239.84193 * delta_nm / Lambda ** 2), decimals)
+
+
+def nm_cm(x_nm, laser_wavelength):
+    """Return the converted energy from nm to cm-1 relatively to the wavelength of the laser."""
+    # We need some constants for the conversion.
+    PLANK = scipy.constants.Planck
+    EV = scipy.constants.eV
+    SPEED_OF_LIGHT = scipy.constants.speed_of_light
+    # Factor of conversion.
+    factor = (PLANK/EV * SPEED_OF_LIGHT*100)**-1
+    return (nm_eV(laser_wavelength) - nm_eV(x_nm)) * factor
 
 
 def date(representation='literal'):
@@ -369,21 +388,34 @@ def get_value(str2search, filename):
 
 
 def get_filenames_at_location(loc, format_, keyword=None, print_name=True):
-    """Return a list of all file names at location matching with the specified format and print the names.
+    """This void function is used to issue a deprecation warning."""
+    raise DeprecationWarning("This function name has changed, use ``get_filenames`` instead.")
+def get_filenames(loc, format_, keyword=None, print_name=True, sort_end=False, reverse=False):
+    """Return a list of all filenames at specified location matching with the given format and keyword.
     
     Parameters
     ----------
     loc : path to the folder location.
 
-    format_ : format of the searched files. Do not include the '.' in the format.
+    format_ : format of the searched files.
+        Ex: can be with or without the point. '.txt' and 'txt' are both valid.
     
-    keyword : string pattern to match in the file names.
+    keyword : string pattern to match in the filenames.
 
     print_name : print the name of the files in the standard output.
+
+    sort_end : sort the filenames by the end of the string.
+
+    reverse : If False sort by ascending order. If True sort by descending order.
+
+    Return a numpy array.
 
     """
     # we choose the current directory where all the files are located
     os.chdir(loc)
+    # Remove the '.' in ``format_``.
+    if '.' in format_:
+        format_ = format_[1:]
     # glob return a list with all the files with format_
     if keyword is not None:
         filenames = glob.glob("*{0}*.{1}".format(keyword, format_), recursive=False)
@@ -393,11 +425,15 @@ def get_filenames_at_location(loc, format_, keyword=None, print_name=True):
     for i, file in enumerate(filenames):
         # remove the specified format at the end of the file and the preceding point
         filenames[i] = file[:-length]
+    if sort_end:
+        filenames = sorted(filenames, key=lambda s: s[::-1], reverse=reverse)
+    else:
+        filenames = sorted(filenames, reverse=reverse)         
     if print_name:
         for i, file in enumerate(filenames):
-            print('({})'.format(i), file)
+            print('({:})'.format(i), file)
         print("\n")
-    return filenames
+    return np.array(filenames)
 
 
 def get_last_filename_number_at_location(loc='/Users/pelini/L2C/Manip uPL UV 3K/Data/analysis/images en bazar/',
@@ -407,7 +443,7 @@ def get_last_filename_number_at_location(loc='/Users/pelini/L2C/Manip uPL UV 3K/
     Parameters
     ----------
     loc     : the location of the folder to search in
-    keyword : the pattern to filter file names
+    keyword : the pattern to filter filenames
     fmt     : the format of the files
 
     """
@@ -515,7 +551,7 @@ def several_spectrum_plot(data, list_of_index, xdata=None, tab_of_lambda=None, l
 
 
 def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_for_plot_function={}, label=True,
-                  bounds=(-np.inf, np.inf), **fit_functions):
+                  bounds=None, **fit_functions):
     """
     Plot y versus x with the plot_function given (default to ``plt.plot``), and compute and plot the fits with the
     fit functions given, display the fit parameters in the label.
@@ -537,7 +573,7 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
     bounds : 2-tuple of array-like or scalar.
         If array: must have length equal to the number of parameters.
         If scalar: same bound for each parameter.
-        Default to  no bounds (-np.inf, np.inf).
+        If 'None' defaults to no bounds (-np.inf, np.inf).
                         
     **fit_functions : the 'key' must be the name of the fit function and the 'value' the proper function. 
                       Example: >> gaussian=fct.gaussian
@@ -545,7 +581,6 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
     Return a dictionnary in which the key indicates the fit function and the value is an array of fitted parameters.
 
     """
-
     def make_label(fit_function_name, popt):
 
         values = np.concatenate([[j, popt] for j, popt in enumerate(popt, 1)])
@@ -587,13 +622,14 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
     import warnings
     warnings.filterwarnings("error")
 
+    bounds = (-np.inf, np.inf) if bounds is None else bounds
     result_fit_parameters = {}
     for i, (name, function) in enumerate(fit_functions.items(), 1):
         if (initial_guess is not None) and (name in initial_guess.keys()):
             try:
                 popt, pcov = curve_fit(function, x, y, p0=initial_guess[name], bounds=bounds)
                 result_fit_parameters[name] = popt
-            except Exception:
+            except RuntimeError:
                 print("Fit with {} function did not succeed, try to provide better initial guess.".format(name))
                 result_fit_parameters[name] = None
         elif name in ['gaussian', 'lorentzian']:
@@ -602,9 +638,9 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
             B = np.mean([y[0], y[-1]])
             A = np.max(y) - B
             try:
-                popt, pcov = curve_fit(function, x, y, p0=[wide, mu, A, B])
+                popt, pcov = curve_fit(function, x, y, p0=[wide, mu, A, B], bounds=bounds)
                 result_fit_parameters[name] = popt
-            except Exception:
+            except RuntimeError:
                 print("Fit with {} function did not succeed, try to provide initial guess.".format(name))
                 result_fit_parameters[name] = None
         elif name in ['gaussian_linear', 'lorentzian_linear']:
@@ -614,18 +650,18 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
             A = np.max(y) - B
             a = (y[-1] - y[0]) / (x[-1] - x[0])
             try:
-                popt, pcov = curve_fit(function, x, y, p0=[wide, mu, A, B, a])
+                popt, pcov = curve_fit(function, x, y, p0=[wide, mu, A, B, a], bounds=bounds)
                 result_fit_parameters[name] = popt
-            except Exception:
+            except RuntimeError:
                 print("Fit with {} function did not succeed, try to provide initial guess.".format(name))
                 result_fit_parameters[name] = None
         elif name == 'linear':
             a = (y[-1] - y[0]) / (x[-1] - x[0])
             b = y[0] - a * x[0]
             try:
-                popt, pcov = curve_fit(function, x, y, p0=[a, b])
+                popt, pcov = curve_fit(function, x, y, p0=[a, b], bounds=bounds)
                 result_fit_parameters[name] = popt
-            except Exception:
+            except RuntimeError:
                 print("Fit with {} function did not succeed, try to provide initial guess.".format(name))
                 result_fit_parameters[name] = None
         else:
@@ -812,11 +848,11 @@ def normalize(filename, ydata, tacq_position, power_position):
 #######################################################################################################################
 
 def get_parameters(filename):
-    """Return a dictionary with all the parameters contained in the file name given, following the established regex.
+    """Return a dictionary with all the parameters contained in the filename given, following the established regex.
 
-    The file extension must be removed from the file name.
+    The file extension must be removed from the filename.
     
-    Parameters looked for in the file name
+    Parameters looked for in the filename
     --------------------------------------
     temperature : in kelvin
     
@@ -863,7 +899,7 @@ def get_parameters_key(filename):
     Conventions of name have been fixed by a collective choice. Use regular expressions.
 
     """
-    # Find the keys present in the file name.
+    # Find the keys present in the filename.
     # keys_in_filename = re.findall("[a-zA-Z]+(?=\[)", s)  # matches any string that is followed by '['
 
     # We could create a list for each parameter in which all the name variations of the related key would be listed so
@@ -902,17 +938,17 @@ def make_DataFrame(list_of_filenames, files_location, format_, version='old', un
     Return a dataframe. The number of row correponds to the number of filename & the number of columns to the numbers
     of parameters found in the filenames plus the data.
     
-    Important: the extension of the file names given are supposed to be removed.
-    Warning: this function is made for the MacroPL experiment and the convention taken for the file names.
-    It is necessary to adapt this function for other file names, along with the 'get_parameters' function.
+    Important: the extension of the filenames given are supposed to be removed.
+    Warning: this function is made for the MacroPL experiment and the convention taken for the filenames.
+    It is necessary to adapt this function for other filenames, along with the 'get_parameters' function.
     
-    => There is an 'old' <version>: adapted when no keys are used in the file name. The order of the parameter written
-    in the file name is primordial.
+    => There is an 'old' <version>: adapted when no keys are used in the filename. The order of the parameter written
+    in the filename is primordial.
     
-    => There is a 'new' <version>: adapted when keys are used in the file name. Much more adaptable, does not depend on
+    => There is a 'new' <version>: adapted when keys are used in the filename. Much more adaptable, does not depend on
     the order of the parameter, neither on the existence or not of some parameter.
     
-    Parameters looked for in the file names
+    Parameters looked for in the filenames
     ---------------------------------------
     temperature : in kelvin
     
