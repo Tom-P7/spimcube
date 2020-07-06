@@ -35,6 +35,13 @@ To update to the last version of the package use:
 $ pip install --upgrade spimcube
 ```
 
+### Example of use
+
+The tools present in `spimcube`
+Start by importing the tools:
+
+```sh
+
 
 ### Todos
 
