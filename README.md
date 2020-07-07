@@ -92,7 +92,7 @@ si.image.set_cmap('viridis')
 si.ax_spectrum.set_facecolor('blue')
 ```
 
-> Check the docstring of each object and methods to see the numerous options available.
+> Check the docstring of each object and method to see the numerous options available.
 
 ### Todos
 
