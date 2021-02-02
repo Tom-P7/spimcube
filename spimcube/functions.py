@@ -112,13 +112,16 @@ def z_score_diff(spectrum):
     return abs(np.diff(spectrum))
 
 
-def remove_spikes(array, window_size=10, threshold=200):
+def remove_spikes(array, section=None, window_size=10, threshold=200):
     """Removes spikes from data contained in ``array`` and return the cleaned array.
 
     Parameters
     ----------
     array: array-like object.
         Must be of dimension ???
+
+    section : 2-tuple. The spike removal will be performed only inside the limits
+        specified by the 2-tuple.
 
     window_size :
 
@@ -138,13 +141,18 @@ def remove_spikes(array, window_size=10, threshold=200):
     else:
         raise TypeError("``array`` must be an array-like object with finite dimension >= 1.")
 
+    if section is None:
+        section = np.arange(data.shape[-1] - 1)
+    else:
+        section = np.arange(section[0], min(section[1], data.shape[-1] - 1))  
+
     # Selecting spikes based on threshold criterion. Note that spikes dimension 1 is one time smaller.
     spikes = z_score_diff(data) > threshold
 
     # Replace each spike value by the mean value of neighboring pixels, the number of which is determined
     # by ``window_size``.
     for i, spectrum in enumerate(data):
-        for j in range(len(spectrum) - 1):
+        for j in section:
             if spikes[i, j]:
                 window = np.arange(max(0, j - window_size), min(j + window_size + 1, len(spectrum) - 1))
                 window = window[~spikes[i, window]]  # Eliminate from the window the pixels that are spkikes.
@@ -247,6 +255,7 @@ def linear(x, a, b):
 
 
 def gaussian(x, sigma, mu, A, B):
+    """The area under the gaussian function without the background is given by: A*sigma*np.sqrt(2*np.pi)."""
     return np.exp(-((x - mu) / np.sqrt(2 * sigma ** 2)) ** 2) * A + B
 
 
@@ -254,6 +263,7 @@ def gaussian(x, sigma, mu, A, B):
 # need to calculate the y-intercept (ordonnée à l'origine) ``b``
 
 def gaussian_linear(x, sigma, mu, A, B, a):
+    
     return (np.exp(-((x - mu) / np.sqrt(2 * sigma ** 2)) ** 2) * A + B) + (a * x)
 
 
@@ -288,6 +298,7 @@ def quadruple_gaussian(x, sigma1, mu1, A1, sigma2, mu2, A2, sigma3, mu3, A3, sig
                        np.exp(-((x - mu4) / np.sqrt(2 * sigma4 ** 2)) ** 2) * A4) + B
 
 
+# In this formulae: A = 2/(pi*Gamma) , and B is the background
 def lorentzian(x, gamma, mu, A, B):
     return 1 / (1 + (2 * (x - mu) / gamma) ** 2) * A + B
 
@@ -367,6 +378,18 @@ def g2_irf(x, a=None, lambda1=None, lambda2=None, t0=None):
     return np.concatenate((y_1, y_2))
 
 
+def fit_polarization(x, A, B, phi, C):
+    return (A-C) * np.cos(B*x+phi)**2 + C
+
+
+def differential_reflectance(signal, reference):
+    return (signal - reference)/(signal)
+
+
+def contrast_reflectance(signal, reference):
+    return (signal - reference)/(signal + reference)
+
+
 #######################################################################################################################
 ################################################# STRING AND FOLDER RELATED ###########################################
 #######################################################################################################################
@@ -390,23 +413,26 @@ def get_value(str2search, filename):
 def get_filenames_at_location(loc, format_, keyword=None, print_name=True):
     """This void function is used to issue a deprecation warning."""
     raise DeprecationWarning("This function name has changed, use ``get_filenames`` instead.")
-def get_filenames(loc, format_, keyword=None, print_name=True, sort_end=False, reverse=False):
+def get_filenames(loc, format_='txt', keyword=None, print_name=True, sort_by_date=True, sort_by_end=False, reverse=False):
     """Return a list of all filenames at specified location matching with the given format and keyword.
     
     Parameters
     ----------
     loc : path to the folder location.
 
-    format_ : format of the searched files.
+    format_ : format of the searched files. (default: 'txt')
         Ex: can be with or without the point. '.txt' and 'txt' are both valid.
     
-    keyword : string pattern to match in the filenames.
+    keyword : string or sequence of string to match in the filenames.
 
     print_name : print the name of the files in the standard output.
 
-    sort_end : sort the filenames by the end of the string.
+    sort_by_date : sort by the date at the end of the filename
+        It is assumed that the filename end in "201104_01" for the 1st file of the 4th of November 2020.
 
-    reverse : If False sort by ascending order. If True sort by descending order.
+    sort_by_end : sort the filenames by the end of the string.
+
+    reverse : If ``False`` sort by ascending order. If ``True`` sort by descending order.
 
     Return a numpy array.
 
@@ -417,18 +443,28 @@ def get_filenames(loc, format_, keyword=None, print_name=True, sort_end=False, r
     if '.' in format_:
         format_ = format_[1:]
     # glob return a list with all the files with format_
-    if keyword is not None:
-        filenames = glob.glob("*{0}*.{1}".format(keyword, format_), recursive=False)
+    all_filenames = glob.glob("*.{}".format(format_), recursive=False)
+    filenames = []
+    if not keyword:
+        filenames = all_filenames
     else:
-        filenames = glob.glob("*.{}".format(format_), recursive=False)
+        keyword = [keyword] if not isinstance(keyword, (list, tuple, np.ndarray)) else keyword
+        for file in all_filenames:
+            if all(map(lambda word: word in file, keyword)):
+                filenames.append(file)
     length = len('.' + format_)
     for i, file in enumerate(filenames):
         # remove the specified format at the end of the file and the preceding point
         filenames[i] = file[:-length]
-    if sort_end:
+    if sort_by_date and sort_by_end:
+        raise ValueError("Only one type of sorting is allowed")
+    if sort_by_date:
+        filenames = sorted(filenames, key=lambda s: s[-9:], reverse=reverse)
+    if sort_by_end:
         filenames = sorted(filenames, key=lambda s: s[::-1], reverse=reverse)
-    else:
-        filenames = sorted(filenames, reverse=reverse)         
+    if not sort_by_date and not sort_by_end:
+        # I sort by the beginning.
+        filenames = sorted(filenames, reverse=reverse)
     if print_name:
         for i, file in enumerate(filenames):
             print('({:})'.format(i), file)
@@ -447,7 +483,7 @@ def get_last_filename_number_at_location(loc='/Users/pelini/L2C/Manip uPL UV 3K/
     fmt     : the format of the files
 
     """
-    filenames = get_filenames_at_location(loc, fmt, keyword=keyword, print_name=False)
+    filenames = get_filenames(loc, fmt, keyword=keyword, print_name=False)
     numbers = np.empty(len(filenames), dtype=np.int8)
     for i, file in enumerate(filenames):
         number = re.findall(r'\d+', file)
@@ -565,20 +601,25 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
     ax : axis on which to plot, default is to create a new figure and ax
     
     plot_function : function to use to plot the data. Ex: `plt.plot` (default), `plt.scatter`, `plt.hist2d`, etc.
+
+    label: bool, None. Whether to plot the legend with the fitted parameters (True), don't plot but print them (False),
+        or don't plot them in the legend neither print them (None).
     
     initial_guess : Must be a dictionnary.
-                        key   : name of the fit function
-                        value : list of guess values for the parameters of the fit function
+        key   : name of the fit function
+        value : list of guess values for the parameters of the fit function
 
     bounds : 2-tuple of array-like or scalar.
         If array: must have length equal to the number of parameters.
         If scalar: same bound for each parameter.
         If 'None' defaults to no bounds (-np.inf, np.inf).
                         
-    **fit_functions : the 'key' must be the name of the fit function and the 'value' the proper function. 
-                      Example: >> gaussian=fct.gaussian
+    fit_functions : the 'key' must be the name of the fit function and the 'value' the proper function. 
+        Example:  gaussian=fct.gaussian, lorentzian_linear=fct.lorentzian_linear
 
-    Return a dictionnary in which the key indicates the fit function and the value is an array of fitted parameters.
+    Return a 2-tuple of dictionnary. The first one is ``result_fit_parameters`` in which the key indicates
+    the fit function and the value is an array of fitted parameters. The second one is ``result_fit_parameters_err``
+    for that return "np.sqrt(np.diag(pcov))" where pcov is the covariance matrix return by ``scipy.optimize.curve_fit``.
 
     """
     def make_label(fit_function_name, popt):
@@ -609,8 +650,8 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
         ybottom, ytop = generate_boundaries(y, method='extrema_delta')
         ax.set_xlim(left=xleft, right=xright)
         ax.set_ylim(bottom=ybottom, top=ytop)
-    x = np.asarray(x) if not isinstance(x, np.ndarray) else x
-    y = np.asarray(y) if not isinstance(y, np.ndarray) else y
+    x = np.array(x) 
+    y = np.array(y)
     xfit = np.linspace(np.nanmin(x), np.nanmax(x), 10 * len(x))
 
     plot_function = plt.plot if plot_function is None else plot_function
@@ -624,14 +665,17 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
 
     bounds = (-np.inf, np.inf) if bounds is None else bounds
     result_fit_parameters = {}
+    result_fit_parameters_err = {}
     for i, (name, function) in enumerate(fit_functions.items(), 1):
         if (initial_guess is not None) and (name in initial_guess.keys()):
             try:
                 popt, pcov = curve_fit(function, x, y, p0=initial_guess[name], bounds=bounds)
                 result_fit_parameters[name] = popt
+                result_fit_parameters_err[name] = np.sqrt(np.diag(pcov))
             except RuntimeError:
                 print("Fit with {} function did not succeed, try to provide better initial guess.".format(name))
                 result_fit_parameters[name] = None
+                result_fit_parameters_err[name] = None
         elif name in ['gaussian', 'lorentzian']:
             wide = 0.1
             mu = x[np.argmax(y)]
@@ -640,11 +684,14 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
             try:
                 popt, pcov = curve_fit(function, x, y, p0=[wide, mu, A, B], bounds=bounds)
                 result_fit_parameters[name] = popt
+                result_fit_parameters_err[name] = np.sqrt(np.diag(pcov))
             except RuntimeError:
                 print("Fit with {} function did not succeed, try to provide initial guess.".format(name))
                 result_fit_parameters[name] = None
+                result_fit_parameters_err[name] = None
         elif name in ['gaussian_linear', 'lorentzian_linear']:
-            wide = 0.1
+            wide = 1  # I have to find a way to let the user define this, as it is sometime needed to use 'bounds'
+                        # but not 'initial_guess', but the value 'wide' is out of 'bounds' and is the only one we want to change.
             mu = x[np.argmax(y)]
             B = np.mean([y[0], y[-1]])
             A = np.max(y) - B
@@ -652,36 +699,41 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
             try:
                 popt, pcov = curve_fit(function, x, y, p0=[wide, mu, A, B, a], bounds=bounds)
                 result_fit_parameters[name] = popt
+                result_fit_parameters_err[name] = np.sqrt(np.diag(pcov))
             except RuntimeError:
                 print("Fit with {} function did not succeed, try to provide initial guess.".format(name))
                 result_fit_parameters[name] = None
+                result_fit_parameters_err[name] = None
         elif name == 'linear':
             a = (y[-1] - y[0]) / (x[-1] - x[0])
             b = y[0] - a * x[0]
             try:
                 popt, pcov = curve_fit(function, x, y, p0=[a, b], bounds=bounds)
                 result_fit_parameters[name] = popt
+                result_fit_parameters_err[name] = np.sqrt(np.diag(pcov))
             except RuntimeError:
                 print("Fit with {} function did not succeed, try to provide initial guess.".format(name))
                 result_fit_parameters[name] = None
+                result_fit_parameters_err[name] = None
         else:
             raise ValueError("An initial guess for the fit function `{}` must be provided".format(name))
 
-        if result_fit_parameters[name] is not None:
-            if label is True:
+        if result_fit_parameters[name] is not None:           
+            if label is None:
+                ax.plot(xfit, function(xfit, *popt), '--', c=colors[i])
+            elif label:
                 ax.plot(xfit, function(xfit, *popt), '--', c=colors[i], label=make_label(name, popt))
                 print(name, 'fit standard deviation errors: ', np.sqrt(np.diag(pcov)))
-            else:
+            elif not label:
                 ax.plot(xfit, function(xfit, *popt), '--', c=colors[i])
                 print(name, "fit parameters: ", result_fit_parameters[name], "\n",
-                      name, "fit standard deviation errors: ", np.sqrt(np.diag(pcov))
+                      name, "fit standard deviation errors: ", np.sqrt(np.diag(pcov)),
                       )
-        if label is True:
-            plt.legend(loc=(0, 1.01))  # loc='upper center', bbox_to_anchor=[0.5, 1.13])
-
+    if label:
+        plt.legend(loc=(0, 1.01))  # loc='upper center', bbox_to_anchor=[0.5, 1.13])
+            
     warnings.filterwarnings('default')
-
-    return result_fit_parameters
+    return result_fit_parameters, result_fit_parameters_err
 
 
 def draw_H_bar(x1, y1, x2, y2, ax=None, ratio=0.25, height=None, text=None, text_vpos=None, kw_hline={}, kw_vlines={},
@@ -840,6 +892,54 @@ def normalize(filename, ydata, tacq_position, power_position):
     power_value = float(power[:-2])
     # print(power_value)
     return ydata / (acq_time * power_value)
+
+
+def second_axis(ax, which='x'):
+    """Create a second x and/or y axis in eV if initial scaling is in nm, or the other way around.
+    
+    Parameters
+    ----------
+    ax : axes to which add the second axis
+    
+    which : 'x', 'y', or 'both'
+    
+    Return the new axes instance, either a single axes or a list of two axes.
+    
+    """
+    if which == 'x':
+        axtwin = ax.twiny()
+        axtwin.xaxis.set_major_locator(ax.xaxis.get_major_locator())
+        axtwin.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, pos: round(1239.84193/x, 3)))
+        axtwin.set_xbound(ax.get_xbound())
+        #axtwin.tick_params(axis='x', which='major', direction='in', length=4.3, width=1.2)
+        axtwin.set_xlabel("[eV]", labelpad=10)
+        new_axis = axtwin
+    elif which == 'y':
+        axtwin = ax.twinx()
+        axtwin.yaxis.set_major_locator(ax.yaxis.get_major_locator())
+        axtwin.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, pos: round(1239.84193/y, 3)))
+        axtwin.set_ybound(ax.get_ybound())
+        #axtwin.tick_params(axis='x', which='major', direction='in', length=4.3, width=1.2)
+        axtwin.set_ylabel("[eV]", labelpad=10)
+        new_axis = axtwin
+    elif which == 'both':
+        # x
+        axtwin_x = ax.twiny()
+        axtwin_x.xaxis.set_major_locator(ax.xaxis.get_major_locator())
+        axtwin_x.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, pos: round(1239.84193/x, 3)))
+        axtwin_x.set_xbound(ax.get_xbound())
+        axtwin_x.set_xlabel("[eV]", labelpad=10)
+        # y
+        axtwin_y = ax.twinx()
+        axtwin_y.yaxis.set_major_locator(ax.yaxis.get_major_locator())
+        axtwin_y.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, pos: round(1239.84193/y, 3)))
+        axtwin_y.set_ybound(ax.get_ybound())
+        axtwin_y.set_ylabel("[eV]", labelpad=10)
+        # new axis
+        new_axis = [axtwin_x, axtwin_y]
+    # We set the current axes in pyplot back to the original one
+    plt.sca(ax)
+    return new_axis
 
 
 #######################################################################################################################
@@ -1042,3 +1142,114 @@ def highlight_row_by_name(s, names, color):
         return ['background-color: ' + color] * len(s)
     else:
         return ['background-color: white'] * len(s)
+
+
+def df_from_files(folder, files, fmt='txt', columns=['x', 'y']):
+    """Computes a dataframe from two-columns data files, for each file in ``files``.
+
+    Each row corresponds to a datafile, each column to a type of data, each cell to the list of data.
+    
+    Parameters
+    ----------
+    folder : complete path to folder.
+    
+    files : sequence of file names to extract data from.
+    
+    fmt : format of the data file.
+    
+    columns : column name to use for each column
+    
+    Return a pandas dataframe.
+    
+    """
+    xx, yy = [], []
+    for file in files:
+        if fmt is None:
+            x, y = np.loadtxt(folder+file, unpack=True)
+        else:
+            x, y = np.loadtxt(folder+file+'.'+fmt, unpack=True)
+        xx.append(x)
+        yy.append(y)
+        
+    df = pd.DataFrame(data={columns[0]: xx, columns[1]: yy})
+    # Alternative way:
+    #df.insert(0, 'x', xx)
+    #df.insert(1, 'y', yy)
+    return df
+
+
+def df_from_bsweep(folder, file, B_init, B_final, step, CCD_nb_pixel=1340):
+    """Computes a dataframe from a file associated to a sweep in magnetic field.
+
+    The file should contain several spectra at different field.
+
+    Parameters
+    ----------
+    folder: complete path to folder.
+
+    file: name of the file.
+
+    B_init, B_final: value of initial and final magnetic field.
+
+    step: the step in magnetic field in the sweep.
+
+    CCD_nb_pixel: number of pixels on the CCD. default to 1340, standard at LNCMI-G.
+    
+    """
+    number_of_steps = int(abs((B_final - B_init)/step) + 1)
+    B_values = np.linspace(B_init, B_final, number_of_steps) 
+    # Extract the spectra.
+    col_1, col_2 = np.loadtxt(folder+file+'.txt', unpack=True)
+    col_1 = np.reshape(col_1, (number_of_steps, CCD_nb_pixel))
+    col_2 = np.reshape(col_2, (number_of_steps, CCD_nb_pixel))
+    # Create the list of the different quantities.
+    wavelength = [list(x) for x in col_1]
+    intensity = [list(y) for y in col_2]
+    energy = [list(nm_eV(x)) for x in wavelength]
+
+    df = pd.DataFrame(data={'B': B_values, 'wavelength': wavelength, 'energy': energy, 'intensity': intensity})
+    df.sort_values(by='B', ascending=True, inplace=True, ignore_index=True)
+    return df
+
+
+def plot_df(df, row_selection=None, range_selection=None, columns=None, **kwargs):
+    """A simple routine to plot data from dataframe by selecting rows with ``selection``.
+    
+    Paramaters
+    ----------
+    df : dataframe
+    
+    row_selection : list or slice of indices of rows.
+
+    range_selection : determines the range in x axis to plot the data. Two ways:
+        - list of min and max values in x axis unit. Ex: [700, 720] in nm.
+            This works correctly only if all data sets have the same wavelength range.
+            Use manually 'plot.xlim()' if this is not the case.
+        - slice of index range. Ex: slice(300, 1500) plot between the 600th and 1500th pixel.
+
+    columns: list or tuple of integers/strings.
+        The two index or label corresponding to the two columns to plot against each other.
+
+    **kwargs: all additional keyword arguments are passed to the ``plt.plot`` call.
+    
+    """
+    # Defining default value for parameters if unspecified.
+    row_selection = slice(None) if row_selection is None else row_selection
+    range_selection = slice(None) if range_selection is None else range_selection
+    columns = (0, 1) if columns is None else columns
+    # Defining the method to access data in dataframe depending on given index or label passed to ``columns``.
+    serie_1 = df.iloc[row_selection, columns[0]] if isinstance(columns[0], int) else df.loc[row_selection, columns[0]]
+    serie_2 = df.iloc[row_selection, columns[1]] if isinstance(columns[1], int) else df.loc[row_selection, columns[1]]
+    # I reset the index of the pandas series so I can adress them by index starting at 0.
+    serie_1.reset_index(drop=True, inplace=True)
+    serie_2.reset_index(drop=True, inplace=True)
+    # If min and max value ox x axis are given for plotting data, we create a slice object
+    # with the corresponding index values.
+    if isinstance(range_selection, (list, np.ndarray, tuple)):
+        min_x = find_nearest(serie_1[0], range_selection[0])[0]
+        max_x = find_nearest(serie_1[0], range_selection[1])[0]
+        range_selection = slice(min_x, max_x)
+    # Let's plot !
+    for (x, y) in zip(serie_1, serie_2):
+        plt.plot(x[range_selection], y[range_selection], **kwargs)
+        

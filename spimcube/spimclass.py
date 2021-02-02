@@ -3,7 +3,9 @@ import copy
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.widgets import (Slider, Button, RadioButtons, CheckButtons, Cursor, MultiCursor, RectangleSelector)
+from matplotlib.widgets import (Slider, Button, RadioButtons, CheckButtons, Cursor, MultiCursor, RectangleSelector, Lasso)
+from matplotlib import path
+from matplotlib.collections import RegularPolyCollection
 import numpy as np
 import statistics as stat
 
@@ -588,9 +590,15 @@ class SpimInterface:
         ax__button_delta_minus = self.fig.add_axes([l4, b2, (w1 - 0.003) / 2, h3])
         ax__button_delta_plus = self.fig.add_axes([l4 + (w1 + 0.003) / 2, b2, (w1 - 0.003) / 2, h3])
         ax__button_plot_image = self.fig.add_axes([l4 + w1 + hsp1, b2, w1, h3])
-        ax__button_save_spect = self.fig.add_axes([l1, b1, w1, h1])
-        ax__button_plot_spect = self.fig.add_axes([l1 + w1 + hsp1, b1, w1, h1])
-        ax__button_reset_spect = self.fig.add_axes([l1 + 2 * w1 + 2 * hsp1, b1, w1, h1])
+        ax__button_save_spect = self.fig.add_axes([l1, b2, w1, h3])
+        ax__button_plot_spect = self.fig.add_axes([l1, b4, w1, h3])
+        ax__button_reset_spect = self.fig.add_axes([l1 + w1 + hsp1, b4, w1, h3])
+        ax__button_add_slider = self.fig.add_axes([l1 + 2*w1 + 2*hsp1, b2, w1, h3])
+        ax__button_delete_slider = self.fig.add_axes([l1 + 3*w1 + 3*hsp1, b2, w1, h3])
+        ax__button_switch_slider = self.fig.add_axes([l1 + 2.5*w1 + 2.5*hsp1, b4, w1, h3])
+        # Indication that the above three buttons pertain to sliders.
+        self.fig.text((l1+2.5*w1+2.5*hsp1) + w1/2, b4-0.5*h3, '-------Sliders-------', va='center', ha='center',
+                      fontsize=12)
         ## - RadioButtons -
         ax__radiobutton_yscale = self.fig.add_axes([l3 + w2 + hsp1, b3, w2, h2], facecolor=widget_color)
         ax__radiobutton_ylim = self.fig.add_axes([l3 + w2 + hsp1, b2, w2, h2], facecolor=widget_color)
@@ -627,6 +635,9 @@ class SpimInterface:
         self.button_save_spect = FancyButton(ax__button_save_spect, 'Save', **prop)
         self.button_plot_spect = FancyButton(ax__button_plot_spect, 'Plot', **prop)
         self.button_reset_spect = FancyButton(ax__button_reset_spect, 'Reset', **prop)
+        self.button_add_slider = FancyButton(ax__button_add_slider, 'Add', **prop)
+        self.button_delete_slider = FancyButton(ax__button_delete_slider, 'Delete', **prop)
+        self.button_switch_slider = FancyButton(ax__button_switch_slider, 'Switch', **prop)
         ### Connection to callback functions.
         self.button_reset_sliders.on_clicked(self._reset_sliders)
         self.button_full_range.on_clicked(self._set_full_range)
@@ -1062,7 +1073,7 @@ class SpimInterface:
 class Indicator(Cursor):
     """Create a cursor with ability to measure horizontal and vertical distances between two points."""
 
-    def __init__(self, ax=None, unit_eV=False, stick_to_data=True, useblit=True, **cursorprops):
+    def __init__(self, ax=None, unit_eV=False, stick_to_data=False, useblit=True, **cursorprops):
         """
         Parameters
         ----------
@@ -1383,3 +1394,101 @@ class MultiCursorAml(MultiCursor):
         else:
             self.visible = True
             plt.draw()
+
+
+class Datum:
+    colorin = mpl.colors.to_rgba("tab:red")
+    colorout = mpl.colors.to_rgba("tab:blue")
+
+    def __init__(self, x, y, include=False):
+        self.x = x
+        self.y = y
+        if include:
+            self.color = self.colorin
+        else:
+            self.color = self.colorout
+
+
+from scipy.optimize import curve_fit
+
+
+class LassoSelectorFit:
+    def __init__(self, ax, x, y, errors=None, splitting=True):
+        """
+        Parameters
+        ----------
+
+        splitting : True if the calculation is on zeeman splitting, False if on full peak position
+        """
+        self.axes = ax
+        self.canvas = ax.figure.canvas
+        data = [Datum(x, y) for (x, y) in zip(x, y)]
+        self.data = data
+        self.Nxy = len(data)
+        self.splitting = splitting
+
+        self.facecolors = [d.color for d in data]
+        self.xys = [(d.x, d.y) for d in data]
+        self.xs = [d.x for d in data]
+        self.ys = [d.y for d in data]
+        
+        self.fit = None
+        self.g = None
+        
+        self.collection = RegularPolyCollection(4, rotation=np.pi/4, sizes=(30,), facecolors=self.facecolors,
+                                                offsets=self.xys, transOffset=ax.transData)
+        ax.add_collection(self.collection)
+        if errors is not None:
+            self.axes.errorbar(self.xs, self.ys, yerr=np.asarray(errors)/2, ls='none', marker='s',
+                               ms=0, ecolor='tab:red', elinewidth=1, capsize=3)
+        ax.autoscale(True)
+
+        self.cid = self.canvas.mpl_connect('button_press_event', self.onpress)
+        
+    def onpress(self, event):
+        if self.canvas.widgetlock.locked():
+            return
+        if event.inaxes != self.axes:
+            return
+        self.lasso = Lasso(event.inaxes, (event.xdata, event.ydata), self.callback)
+        # acquire a lock on the widget drawing
+        self.canvas.widgetlock(self.lasso)
+
+    def callback(self, verts):
+        if self.g:
+            self.g.remove()
+        if self.fit:
+            self.fit.remove()
+        facecolors = self.collection.get_facecolors()
+        p = path.Path(verts)
+        ind = p.contains_points(self.xys)
+        for i in range(len(self.xys)):
+            if ind[i]:
+                facecolors[i] = Datum.colorin
+            else:
+                facecolors[i] = Datum.colorout
+        self.collection.set_facecolors(facecolors)
+        
+        self.innercall(ind)
+
+        self.canvas.draw_idle()
+        self.canvas.widgetlock.release(self.lasso)
+        del self.lasso
+        
+    def innercall(self, ind):
+        xs = np.asarray(self.xs)[ind]
+        ys = np.asarray(self.ys)[ind]
+        # Fit with linear function
+        popt, pcov = curve_fit(fct.linear, xs, ys)
+        xfit = np.linspace(min(self.xs), max(self.xs), 1000)
+        self.fit, = self.axes.plot(xfit, fct.linear(xfit, *popt), '--', color='tab:orange')
+        # Extract and display the abs value of valley magnetic coupling g factor : this has to go away to have a more general use
+        bohr_magneton = 5.788381e-5  # eV.T-1
+        if self.splitting:
+            g_factor = round(popt[0]*1e-3 / bohr_magneton, 2)
+        else:
+            g_factor = round(popt[0] / bohr_magneton, 2) * 2
+        self.g = self.axes.text(0.5, 1.03, "|g| = {}".format(abs(g_factor)), ha='center', transform=self.axes.transAxes,
+                                   size=14, fontweight='heavy')
+        self.axes.relim()
+
