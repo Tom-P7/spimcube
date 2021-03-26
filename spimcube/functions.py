@@ -166,6 +166,57 @@ def remove_spikes(array, section=None, window_size=10, threshold=200):
     return data
 
 
+# From Alrik, see "Data_analysis_tools-AlrikDurand/data.py"
+def get_window(x, y, a, b):
+    """ Very useful method to get just a window [a, b] of a signal (x,y) """
+    mask_1 = a < x
+    mask_2 = x < b
+    mask = np.logical_and(mask_1, mask_2)
+    x = x[mask]
+    y = y[mask]
+    return x, y
+
+def rebin(data, rebin_ratio, do_average=False):
+    """ Rebin a 1D array the good old way.
+
+    @param 1d numpy array data : The data to rebin
+    @param int rebin_ratio: The number of old bin per new bin
+
+    @return 1d numpy array : The array rebinned
+
+    The last values may be dropped if the sizes do not match.
+
+    """
+    data = np.asarray(data)
+    rebin_ratio = int(rebin_ratio)
+    length = (len(data) // rebin_ratio) * rebin_ratio
+    data = data[0:length]
+    data = data.reshape(length//rebin_ratio, rebin_ratio)
+    if do_average :
+        data_rebinned = data.mean(axis=1)
+    else :
+        data_rebinned = data.sum(axis=1)
+    return data_rebinned
+
+def decimate(data, decimation_ratio):
+    """ Decimate a 1D array . This means some value are dropped, not averaged
+
+    @param 1d numpy array data : The data to decimated
+    @param int decimation_ratio: The number of old value per new value
+
+    @return 1d numpy array : The array decimated
+
+    """
+    decimation_ratio = int(decimation_ratio)
+    length = (len(data) // decimation_ratio) * decimation_ratio
+    data_decimated = data[:length:decimation_ratio]
+    return data_decimated
+
+def rebin_xy(x, y,  ratio=1, do_average=True):
+    """ Helper method to decimate x and rebin y, with do_average True as default """
+    return decimate(x, ratio), rebin(y, ratio, do_average)
+# End of : From Alrik
+
 #######################################################################################################################
 ######################################################## CONVERSION ###################################################
 #######################################################################################################################
@@ -190,7 +241,8 @@ def nm_eV(*args, decimals=5):
 
 
 def delta_nm2eV(delta_nm, Lambda, decimals=3):
-    """Return the energy delta in meV.
+    """Return an approximation of the energy delta in meV.
+    It is more precise to calculate a difference in energy by taking the two wavelength in eV.
     
     Parameters
     ----------
@@ -219,6 +271,23 @@ def nm_cm(x_nm, laser_wavelength):
     # Factor of conversion.
     factor = (PLANK/EV * SPEED_OF_LIGHT*100)**-1
     return (nm_eV(laser_wavelength) - nm_eV(x_nm)) * factor
+
+
+def cm_eV(x_cm, laser_wavelength):
+    """Return the converted energy from cm-1 to eV relatively to the wavelength of the laser."""
+    # We need some constants for the conversion.
+    PLANK = scipy.constants.Planck
+    EV = scipy.constants.eV
+    SPEED_OF_LIGHT = scipy.constants.speed_of_light
+    # Factor of conversion.
+    factor = (PLANK/EV * SPEED_OF_LIGHT*100)**-1
+    return x_cm/factor
+
+
+def cm_nm(x_cm, laser_wavelength):
+    """Return the converted energy from cm-1 to nm relatively to the wavelength of the laser."""
+    delta_eV = cm_eV(x_cm, laser_wavelength)
+    return nm_eV((nm_eV(laser_wavelength) - delta_eV))
 
 
 def date(representation='literal'):
@@ -260,7 +329,7 @@ def gaussian(x, sigma, mu, A, B):
 
 
 # linear & affine do the same but with different user input, I think that linear is easier to use because one doesn't
-# need to calculate the y-intercept (ordonnée à l'origine) ``b``
+# need to calculate the y-intercept ``b``
 
 def gaussian_linear(x, sigma, mu, A, B, a):
     
@@ -1144,6 +1213,8 @@ def highlight_row_by_name(s, names, color):
         return ['background-color: white'] * len(s)
 
 
+# I made the one below during postdoc at Grenoble
+
 def df_from_files(folder, files, fmt='txt', columns=['x', 'y']):
     """Computes a dataframe from two-columns data files, for each file in ``files``.
 
@@ -1212,12 +1283,70 @@ def df_from_bsweep(folder, file, B_init, B_final, step, CCD_nb_pixel=1340):
     return df
 
 
-def plot_df(df, row_selection=None, range_selection=None, columns=None, **kwargs):
+def df_from_sweep(folder, file, parameter_name, init_val=None, final_val=None, step=None, CCD_nb_pixel=1340):
+    """Computes a dataframe from a file associated to a sweep of any parameter.
+
+    The file should contain several spectra at different value of the parameter, each value
+    separated by a constant step. It is possible to specify only several parameters or none of them, they will be
+    infered from the specified parameters or arbitrary defined.
+
+    Parameters
+    ----------
+    folder: complete path to folder.
+
+    file: name of the file.
+
+    parameter_name: name of the parameter. Ex: B (for magnetic field), V (for voltage).
+
+    init_val, final_val: value of initial and final parameter.
+
+    step: the step between each value of the parameter.
+
+    CCD_nb_pixel: number of pixels on the CCD. default to 1340, standard at LNCMI-G. Also 1024 for InGaAs camera.
+    
+    """
+    # Extract the spectra.
+    col_1, col_2 = np.loadtxt(folder+file+'.txt', unpack=True)
+
+    number_of_steps = int(np.floor(len(col_1)/CCD_nb_pixel))
+    #number_of_steps = int(abs((final_val - init_val)/step) + 1)
+    step = 1 if step is None else step
+    if init_val is not None and final_val is None:
+        init_val = 0 if init_val is None else init_val
+        if final_val is None:
+            final_val = init_val + (number_of_steps-1)*step
+    elif final_val is not None and init_val is None:
+        final_val = 0 if final_val is None else final_val
+        if init_val is None:
+            init_val = final_val - (number_of_steps-1)*step
+    elif init_val is None and final_val is None:
+        init_val = 0
+        final_val = init_val + (number_of_steps-1)*step 
+
+    param_values = np.linspace(init_val, final_val, number_of_steps)
+        
+    # Reshape.
+    col_1 = np.reshape(col_1, (number_of_steps, CCD_nb_pixel))
+    col_2 = np.reshape(col_2, (number_of_steps, CCD_nb_pixel))
+    # Create the list of the different quantities.
+    wavelength = [list(x) for x in col_1]
+    intensity = [list(y) for y in col_2]
+    energy = [list(nm_eV(x)) for x in wavelength]
+
+    df = pd.DataFrame(data={parameter_name: param_values, 'wavelength': wavelength, 'energy': energy, 'intensity': intensity})
+    df.sort_values(by=parameter_name, ascending=True, inplace=True, ignore_index=True)
+    return df
+
+
+def plot_df(df, columns=None, row_selection=None, range_selection=None, ax=None, **kwargs):
     """A simple routine to plot data from dataframe by selecting rows with ``selection``.
     
     Paramaters
     ----------
     df : dataframe
+
+    columns: list or tuple of integers/strings.
+        The two index or label corresponding to the two columns to plot against each other.
     
     row_selection : list or slice of indices of rows.
 
@@ -1227,8 +1356,7 @@ def plot_df(df, row_selection=None, range_selection=None, columns=None, **kwargs
             Use manually 'plot.xlim()' if this is not the case.
         - slice of index range. Ex: slice(300, 1500) plot between the 600th and 1500th pixel.
 
-    columns: list or tuple of integers/strings.
-        The two index or label corresponding to the two columns to plot against each other.
+    ax : axes on which to plot. Create a new figure and axes if None.
 
     **kwargs: all additional keyword arguments are passed to the ``plt.plot`` call.
     
@@ -1250,6 +1378,61 @@ def plot_df(df, row_selection=None, range_selection=None, columns=None, **kwargs
         max_x = find_nearest(serie_1[0], range_selection[1])[0]
         range_selection = slice(min_x, max_x)
     # Let's plot !
+    if ax == None:
+        fig, ax = plt.subplots(figsize=(10, 6))
     for (x, y) in zip(serie_1, serie_2):
-        plt.plot(x[range_selection], y[range_selection], **kwargs)
+        ax.plot(x[range_selection], y[range_selection], **kwargs)
+
+
+def df_extract(df, **kw_col_values):
+    """
+    Simple way to get a specific set of rows from dataframe by specifying column values.
+    Return a new dataframe containing only the rows that match the specified column values.
+    
+    Parameters
+    ----------
+    df : dataframe
+    
+    kw_col_values : Conditions on column values to select wanted rows of data.
+    
+    Example
+    -------
+    1.
+    data = df_extract(df, B=12, V=[-4, 4])
+    2.
+    conditions = {'V': 1, 'B': [0, 2], 'T': 4}
+    data = df_extract(df, **conditions)
+    
+    """
+    new_df = df.copy(deep=True)
+    for (key, value) in kw_col_values.items():
+        if isinstance(value, (list, np.ndarray)):
+            new_df = new_df[new_df[key].isin(value)]
+        else:
+            new_df = new_df[new_df[key]==value]
+    return new_df
+
+
+def df_savetxt(df, columns, location_and_name, fmt='%f'):
+    """Save 2 columns from a dataframe to a text file. 
+    
+    Parameters
+    ----------
+    df : dataframe
+    
+    columns : list, sequence.
+        The name of the two columns to be saved in the text file.
         
+    location_and_name : full path and name for the text file.
+    
+    fmt : format for writing the data in the text file. Default is float.
+    
+    Example
+    -------
+    df_savetxt(df, ['wavelength', 'intensity'], '/path/to/your/folder/filename.txt')
+    
+    """
+    xx = np.asarray([wave for wave in df[columns[0]]]).ravel()
+    yy = np.asarray([PL for PL in df[columns[1]]]).ravel()
+    np.savetxt(location_and_name, np.column_stack((xx, yy)), fmt=fmt)
+    

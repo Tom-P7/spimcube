@@ -3,14 +3,14 @@ import copy
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.widgets import (Slider, Button, RadioButtons, CheckButtons, Cursor, MultiCursor, RectangleSelector, Lasso)
+from matplotlib.widgets import (AxesWidget, Slider, Button, RadioButtons, CheckButtons, Cursor, MultiCursor, RectangleSelector, Lasso)
 from matplotlib import path
 from matplotlib.collections import RegularPolyCollection
 import numpy as np
 import statistics as stat
 
 import despike
-import spimcube.functions as fct
+import indev.functions as fct
 
 
 class Spim:
@@ -411,7 +411,7 @@ class Spim:
         if len(array_to_fix.ravel()) > expected_length:
             raise ValueError(
                 "The input data set is larger than the specified number of scan positions.\
-                Double-check ``xstep_number`` and ``xstep_number``.")
+                Double-check ``xstep_number`` and ``ystep_number``.")
         elif len(array_to_fix.ravel()) < expected_length:
             delta_length = expected_length - len(array_to_fix.ravel())
             patch_array = np.zeros(shape=delta_length)
@@ -546,6 +546,8 @@ class SpimInterface:
         spec_fc : facecolor of the spectrum window.
         
         """
+        if not isinstance(spim, Spim):
+            raise ValueError('Spim is not an instance from the ``Spim`` class.')
         if lambda_init is None:
             try:
                 lambda_init = spim.tab_lambda[stat.mode(np.argmax(spim.matrix, axis=2).ravel())]
@@ -1115,6 +1117,8 @@ class Indicator(Cursor):
     def _onclick(self, event):
         if (event.inaxes != self.ax) or (not self.active):
             return
+        if not self.canvas.widgetlock.available(self):
+            return
         if self.first_click:
             self._remove_artists(reftext=True, refarrow=False, refvline=False, refhline=False)
             self._append_xy_data_clicked(event)
@@ -1139,6 +1143,8 @@ class Indicator(Cursor):
 
     def _onthemove(self, event):
         if (event.inaxes != self.ax) or (not self.move) or (not self.active):
+            return
+        if not self.canvas.widgetlock.available(self):
             return
         self._draw_arrow(x0=self.xs[self.count - 1], y0=self.ys[self.count - 1], x=event.xdata, y=event.ydata)
         self._remove_artists(reftext=False, refarrow=False, refvline=True, refhline=True)
@@ -1492,3 +1498,352 @@ class LassoSelectorFit:
                                    size=14, fontweight='heavy')
         self.axes.relim()
 
+# Cursor that works for both directions
+class CursorDragHV(AxesWidget):
+    """
+    A modified version of matplotlib cursor that spans the axes and moves when dragged.
+
+    For the cursor to remain responsive you must keep a reference to it.
+
+    Parameters
+    ----------
+    ax : `matplotlib.axes.Axes`
+        The `~.axes.Axes` to attach the cursor to.
+    horizOn : bool, default: True
+        Whether to draw the horizontal line.
+    vertOn : bool, default: True
+        Whether to draw the vertical line.
+    useblit : bool, default: False
+        Use blitting for faster drawing if supported by the backend.
+
+    Other Parameters
+    ----------------
+    **lineprops
+        `.Line2D` properties that control the appearance of the lines.
+        See also `~.Axes.axhline`.
+
+    """
+
+    def __init__(self, ax, horizOn=True, vertOn=True, useblit=False, **lineprops):
+        AxesWidget.__init__(self, ax)
+        
+        self.connect_event('button_press_event', self.onpress)
+        self.connect_event('motion_notify_event', self.onmove)
+        self.connect_event('button_release_event', self.release)
+        self.connect_event('draw_event', self.clear)
+
+        self.visible = True
+        self.horizOn = horizOn
+        self.vertOn = vertOn
+        self.useblit = useblit and self.canvas.supports_blit
+        self.picked = False
+
+        if self.useblit:
+            lineprops['animated'] = True
+            
+        self.lineh = ax.axhline(np.mean((ax.get_ybound()[0], ax.get_ybound()[1])), visible=horizOn, **lineprops)
+        self.linev = ax.axvline(np.mean((ax.get_xbound()[0], ax.get_xbound()[1])), visible=vertOn, **lineprops)
+
+        self.background = None
+        self.needclear = False
+        
+
+    def clear(self, event):
+        """Internal event handler to clear the cursor."""
+        if self.ignore(event):
+            return
+        if self.useblit:
+            self.background = self.canvas.copy_from_bbox(self.ax.bbox)
+        self.linev.set_visible(True)
+        self.lineh.set_visible(True)
+        
+    def onpress(self, event):
+        if event.inaxes != self.ax:
+            return
+        if str(event.button) != 'MouseButton.LEFT':
+            return
+        self.picked = True
+    
+    def release(self, event):
+        if event.inaxes != self.ax:
+            return
+        if str(event.button) != 'MouseButton.LEFT':
+            return
+        self.picked = False
+
+    def onmove(self, event):
+        """Internal event handler to draw the cursor when the mouse moves."""
+        if self.ignore(event):
+            return
+        if not self.canvas.widgetlock.available(self):
+            return
+        if event.inaxes != self.ax:
+            if self.needclear:
+                self.canvas.draw()
+                self.needclear = False
+            return
+        if not self.picked:
+            return
+        self.needclear = True
+        if not self.visible:
+            return
+        
+        self.linev.set_xdata((event.xdata, event.xdata))
+        self.lineh.set_ydata((event.ydata, event.ydata))
+        
+        
+        self.linev.set_visible(self.visible and self.vertOn)
+        self.lineh.set_visible(self.visible and self.horizOn)
+        
+        self._update()
+
+    def _update(self):
+        if self.useblit:
+            if self.background is not None:
+                self.canvas.restore_region(self.background)
+            self.ax.draw_artist(self.linev)
+            self.ax.draw_artist(self.lineh)
+            self.canvas.blit(self.ax.bbox)
+        else:
+            self.canvas.draw_idle()
+        return False
+
+# optimized for vertical cursor
+class CursorDrag(AxesWidget):
+    """
+    A modified version of matplotlib cursor that spans the axes and moves when dragged.
+
+    For the cursor to remain responsive you must keep a reference to it.
+
+    Parameters
+    ----------
+    ax : `matplotlib.axes.Axes`
+        The `~.axes.Axes` to attach the cursor to.
+    useblit : bool, default: False
+        Use blitting for faster drawing if supported by the backend.
+
+    Other Parameters
+    ----------------
+    **lineprops
+        `.Line2D` properties that control the appearance of the lines.
+        See also `~.Axes.axhline`.
+
+    """
+
+    def __init__(self, ax, useblit=False, **lineprops):
+        AxesWidget.__init__(self, ax)
+        
+        self.connect_event('button_press_event', self.onpress)
+        self.connect_event('button_release_event', self.release)
+        self.connect_event('motion_notify_event', self.onmove)
+        self.connect_event('draw_event', self.clear)
+
+        self.visible = True
+        self.useblit = useblit and self.canvas.supports_blit
+        self.picked = False
+
+        if self.useblit:
+            lineprops['animated'] = True
+            
+        if len(ax.get_lines()) == 0:
+            init_pos = np.mean((ax.get_xbound()[0], ax.get_xbound()[1]))
+        else:
+            init_pos = ax.get_lines()[0].get_xdata()[0]
+        self.linev = ax.axvline(init_pos, visible=True, **lineprops)
+
+        self.background = None
+        self.needclear = False
+        
+
+    def clear(self, event):
+        """Internal event handler to clear the cursor."""
+        if self.ignore(event):
+            return
+        if self.useblit:
+            self.background = self.canvas.copy_from_bbox(self.ax.bbox)
+        #self.linev.set_visible(False)
+        
+    def onpress(self, event):
+        if event.inaxes != self.ax:
+            return
+        if str(event.button) != 'MouseButton.LEFT':
+            return
+        self.picked = True
+    
+    def release(self, event):
+        if event.inaxes != self.ax:
+            return
+        if str(event.button) != 'MouseButton.LEFT':
+            return
+        self.picked = False
+
+    def onmove(self, event):
+        """Internal event handler to draw the cursor when the mouse moves."""
+        if self.ignore(event):
+            return
+        if not self.canvas.widgetlock.available(self):
+            return
+        if event.inaxes != self.ax:
+            if self.needclear:
+                self.canvas.draw()
+                self.needclear = False
+            return
+        if not self.picked:
+            return
+        self.needclear = True
+        if not self.visible:
+            return
+        
+        self.linev.set_xdata((event.xdata, event.xdata))        
+        self.linev.set_visible(self.visible)
+        
+        self._update()
+
+    def _update(self):
+        if self.useblit:
+            if self.background is not None:
+                self.canvas.restore_region(self.background)
+            self.ax.draw_artist(self.linev)
+            self.canvas.blit(self.ax.bbox)
+        else:
+            self.canvas.draw_idle()
+        return False
+
+# Crusor that snap to data - in progress
+class CursorSnapData(AxesWidget):
+    """
+    A modified version of matplotlib cursor that spans the axes and moves when dragged.
+
+    For the cursor to remain responsive you must keep a reference to it.
+
+    Parameters
+    ----------
+    ax : `matplotlib.axes.Axes`
+        The `~.axes.Axes` to attach the cursor to.
+    horizOn : bool, default: True
+        Whether to draw the horizontal line.
+    vertOn : bool, default: True
+        Whether to draw the vertical line.
+    useblit : bool, default: False
+        Use blitting for faster drawing if supported by the backend.
+
+    Other Parameters
+    ----------------
+    **lineprops
+        `.Line2D` properties that control the appearance of the lines.
+        See also `~.Axes.axhline`.
+
+    """
+
+    def __init__(self, ax, horizOn=True, vertOn=True, useblit=False, snap_to_data=False, **lineprops):
+        AxesWidget.__init__(self, ax)
+        
+        self.connect_event('button_press_event', self.onpress)
+        self.connect_event('motion_notify_event', self.onmove)
+        self.connect_event('button_release_event', self.release)
+        self.connect_event('draw_event', self.clear)
+        #
+        """
+        if snap_to_data:
+            self.x, self.y = ax.get_lines()[-1].get_data()
+        else:
+            self.x, self.y = None, None
+
+        self.old_x = None
+        self.old_y = None
+        """
+        #    
+        self.visible = True
+        self.horizOn = horizOn
+        self.vertOn = vertOn
+        self.useblit = useblit and self.canvas.supports_blit
+        self.picked = False
+
+        if self.useblit:
+            lineprops['animated'] = True
+            
+        self.lineh = ax.axhline(np.mean((ax.get_ybound()[0], ax.get_ybound()[1])), visible=horizOn, **lineprops)
+        self.linev = ax.axvline(np.mean((ax.get_xbound()[0], ax.get_xbound()[1])), visible=vertOn, **lineprops)
+
+        self.background = None
+        self.needclear = False
+        
+
+    def clear(self, event):
+        """Internal event handler to clear the cursor."""
+        if self.ignore(event):
+            return
+        if self.useblit:
+            self.background = self.canvas.copy_from_bbox(self.ax.bbox)
+        self.linev.set_visible(False)
+        self.lineh.set_visible(False)
+        
+    def onpress(self, event):
+        if event.inaxes != self.ax:
+            return
+        if str(event.button) != 'MouseButton.LEFT':
+            return
+        self.picked = True
+    
+    def release(self, event):
+        if event.inaxes != self.ax:
+            return
+        if str(event.button) != 'MouseButton.LEFT':
+            return
+        self.picked = False
+
+    def onmove(self, event):
+        """Internal event handler to draw the cursor when the mouse moves."""
+        if self.ignore(event):
+            return
+        if not self.canvas.widgetlock.available(self):
+            return
+        if event.inaxes != self.ax:
+            if self.needclear:
+                self.canvas.draw()
+                self.needclear = False
+            return
+        if not self.picked:
+            return
+        self.needclear = True
+        if not self.visible:
+            return
+        
+        #
+        """
+        new_x = np.searchsorted(self.x, event.xdata)
+        new_y = np.searchsorted(self.y, event.ydata)
+        if new_x != self.old_x:
+            self.linev.set_xdata((new_x, new_x))
+        if new_y != self.old_y:
+            self.lineh.set_ydata((new_y, new_y))
+        """
+        #
+        
+        self.linev.set_xdata((event.xdata, event.xdata))
+        self.lineh.set_ydata((event.ydata, event.ydata))
+        
+        
+        self.linev.set_visible(self.visible and self.vertOn)
+        self.lineh.set_visible(self.visible and self.horizOn)
+        
+        #if new_x != self.old_x or new_y != self.old_y:
+        self._update()
+
+        #
+        """
+        self.old_x = new_x
+        self.old_y = new_y
+        """
+        #
+
+    def _update(self):
+        if self.useblit:
+            if self.background is not None:
+                self.canvas.restore_region(self.background)
+            self.ax.draw_artist(self.linev)
+            self.ax.draw_artist(self.lineh)
+            self.canvas.blit(self.ax.bbox)
+        else:
+            self.canvas.draw_idle()
+        return False
