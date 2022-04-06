@@ -102,18 +102,86 @@ def sort_x_y(x, y):
     return x, y
 
 
-def z_score_mean(spectrum):
-    mean = np.mean(spectrum)
-    sigma = np.std(spectrum)
-    return (spectrum - mean) / sigma
+
+# From Alrik, see "Data_analysis_tools-AlrikDurand/data.py"
+
+def get_window(x, y, a, b):
+    """ Very useful method to get just a window [a, b] of a signal (x,y) """
+    mask_1 = a < x
+    mask_2 = x < b
+    mask = np.logical_and(mask_1, mask_2)
+    x = x[mask]
+    y = y[mask]
+    return x, y
 
 
-def z_score_diff(spectrum):
-    return abs(np.diff(spectrum))
+def rebin(data, rebin_ratio, do_average=False):
+    """ Rebin a 1D array the good old way.
+
+    @param 1d numpy array data : The data to rebin
+    @param int rebin_ratio: The number of old bin per new bin
+
+    @return 1d numpy array : The array rebinned
+
+    The last values may be dropped if the sizes do not match.
+
+    """
+    data = np.asarray(data)
+    rebin_ratio = int(rebin_ratio)
+    length = (len(data) // rebin_ratio) * rebin_ratio
+    data = data[0:length]
+    data = data.reshape(length//rebin_ratio, rebin_ratio)
+    if do_average :
+        data_rebinned = data.mean(axis=1)
+    else :
+        data_rebinned = data.sum(axis=1)
+    return data_rebinned
 
 
+def decimate(data, decimation_ratio):
+    """ Decimate a 1D array . This means some value are dropped, not averaged
+
+    @param 1d numpy array data : The data to decimated
+    @param int decimation_ratio: The number of old value per new value
+
+    @return 1d numpy array : The array decimated
+
+    """
+    decimation_ratio = int(decimation_ratio)
+    length = (len(data) // decimation_ratio) * decimation_ratio
+    data_decimated = data[:length:decimation_ratio]
+    return data_decimated
+
+
+def rebin_xy(x, y,  ratio=1, do_average=True):
+    """ Helper method to decimate x and rebin y, with do_average True as default """
+    return decimate(x, ratio), rebin(y, ratio, do_average)
+
+# End of : From Alrik
+
+
+def get_slope(x, y):
+    """Calculate slope by taking first and last values."""
+    return (y[-1]-y[0])/(x[-1]-x[0])
+
+
+def get_intercept(x, y, slope):
+    """Calculate intercept by taking first value."""
+    return y[0] - slope*x[0]
+
+
+#######################################################################################################################
+
+                                            #############################
+              ################################  HANDLE SPIKES IN DATA  ################################
+                                            #############################
+
+#######################################################################################################################
+
+
+"""
 def remove_spikes(array, section=None, window_size=10, threshold=200):
-    """Removes spikes from data contained in ``array`` and return the cleaned array.
+    Removes spikes from data contained in ``array`` and return the cleaned array.
 
     Parameters
     ----------
@@ -127,7 +195,10 @@ def remove_spikes(array, section=None, window_size=10, threshold=200):
 
     threshold :
 
-    """
+    Return
+    ------
+        An array of same shape containing data with spikes removed.
+
     array_ = np.array(array.copy())  # Don't overwrite the data.
     data = []
     shape = array_.shape
@@ -164,58 +235,126 @@ def remove_spikes(array, section=None, window_size=10, threshold=200):
 
     data = np.reshape(data, shape)
     return data
+"""
 
 
-# From Alrik, see "Data_analysis_tools-AlrikDurand/data.py"
-def get_window(x, y, a, b):
-    """ Very useful method to get just a window [a, b] of a signal (x,y) """
-    mask_1 = a < x
-    mask_2 = x < b
-    mask = np.logical_and(mask_1, mask_2)
-    x = x[mask]
-    y = y[mask]
-    return x, y
+def z_score_mean(spectrum):
+    mean = np.mean(spectrum)
+    sigma = np.std(spectrum)
+    return (spectrum - mean) / sigma
 
-def rebin(data, rebin_ratio, do_average=False):
-    """ Rebin a 1D array the good old way.
 
-    @param 1d numpy array data : The data to rebin
-    @param int rebin_ratio: The number of old bin per new bin
+def modified_z_score(array):
+    """This modified z score used the Median Absolute Deviation (MAD)."""
+    array = np.array(array)
+    median = np.median(array)
+    median_absolute_deviation = np.median(np.abs(array - median))
+    # 0.6745 is the 0.75th quartile of the standard normal distribution, to which the MAD converges to.
+    modified_z_scores = 0.6745 * (array - median) / median_absolute_deviation
+    return modified_z_scores
 
-    @return 1d numpy array : The array rebinned
 
-    The last values may be dropped if the sizes do not match.
+def modified_z_score_diff(array):
+    """Apply a modified z score on a differentiated spectrum and return absolute value, from Whitaker and Hayes."""
+    return np.abs(modified_z_score(np.diff(array)))
 
+
+import copy
+
+def spike_fixer(array, threshold=30, wsize=3):
+    """Fix an array by detecting spikes with ``modified_z_score_diff`` method and changing value by taking the mean around spike.
+
+    Parameters
+    ----------
+    array : 1D iterable.
+
+    threshold : integer.
+        Defines the threshold for discriminating spikes.
+
+    wsize : integer.
+        Defines the half size of the window centered on a spike to calculate a mean value to replace spike value.
+        Precisely: (2 * wsize + 1) points around the spike.
+
+    Return
+    ------
+    Fixed array of same size as input array. The original array is not modified.
     """
-    data = np.asarray(data)
-    rebin_ratio = int(rebin_ratio)
-    length = (len(data) // rebin_ratio) * rebin_ratio
-    data = data[0:length]
-    data = data.reshape(length//rebin_ratio, rebin_ratio)
-    if do_average :
-        data_rebinned = data.mean(axis=1)
-    else :
-        data_rebinned = data.sum(axis=1)
-    return data_rebinned
+    # Checking for correct inputs.
+    if not isinstance(array, (list, np.ndarray)):
+        return
+    if not isinstance(threshold, int) or not isinstance(wsize, int):
+        return
+    # Detect spikes based on threshold.
+    spikes = modified_z_score_diff(array) > threshold
+    fixed = copy.deepcopy(array)  # No overwrite of original array
+    # Fix spectrum.
+    for i, spike in enumerate(spikes):
+        if spike:
+            window = np.arange(max(0, i - wsize), min(i + 1 + wsize, len(array)), 1)  # Window around the spike.
+            window = window[~spikes[window]]  # Filter out spikes from the window.
+            fixed[i] = np.mean(array[window])  # Replace the spike value by the mean value of neighboring pixels.
+    return fixed
 
-def decimate(data, decimation_ratio):
-    """ Decimate a 1D array . This means some value are dropped, not averaged
 
-    @param 1d numpy array data : The data to decimated
-    @param int decimation_ratio: The number of old value per new value
+def flattener(fixed_array, spikes_bool, wsize=3, n_neighbors=2):
+    flattened = copy.deepcopy(fixed_array)  # No overwrite of original array
+    corrected = np.array([False]*len(flattened))
+    # Flatten spectrum in region where spike were detected and fixed.
+    for i, spike in enumerate(spikes):
+        if spike:
+            for j in np.arange(max(0, i - n_neighbors), min(i + 1 + n_neighbors, len(fixed_array)), 1):
+                window = np.arange(max(0, j - wsize), min(j + 1 + wsize, len(fixed_array)), 1)  # Window around the spike.
+                flattened[j] = np.mean(fixed_array[window])  # Replace the value by the mean value of neighboring pixels.
+                corrected[j] = True
+    return flattened
 
-    @return 1d numpy array : The array decimated
 
+def spike_fixer_(array, threshold=30, wsize=3):
+    """Fix an array by detecting spikes with ``modified_z_score_diff`` method and changing value by taking the mean around spike.
+
+    Parameters
+    ----------
+    array : 1D iterable.
+
+    threshold : integer.
+        Defines the threshold for discriminating spikes.
+
+    wsize : integer.
+        Defines the half size of the window centered on a spike to calculate a mean value to replace spike value.
+        Precisely: (2 * wsize + 1) points around the spike.
+
+    Return
+    ------
+    Fixed array of same size as input array and a boolean spikes array. The original array is not modified.
     """
-    decimation_ratio = int(decimation_ratio)
-    length = (len(data) // decimation_ratio) * decimation_ratio
-    data_decimated = data[:length:decimation_ratio]
-    return data_decimated
+    # Checking for correct inputs.
+    if not isinstance(array, (list, np.ndarray)):
+        return
+    if not isinstance(threshold, int) or not isinstance(wsize, int):
+        return
+    # Detect spikes based on threshold.
+    spikes = modified_z_score_diff(array) > threshold
+    fixed = copy.deepcopy(array)  # No overwrite of original array
+    # Fix spectrum.
+    for i, spike in enumerate(spikes):
+        if spike:
+            window = np.arange(max(0, i - wsize), min(i + 1 + wsize, len(array)), 1)  # Window around the spike.
+            window = window[~spikes[window]]  # Filter out spikes from the window.
+            fixed[i] = np.mean(array[window])  # Replace the spike value by the mean value of neighboring pixels.
+    return fixed, spikes
 
-def rebin_xy(x, y,  ratio=1, do_average=True):
-    """ Helper method to decimate x and rebin y, with do_average True as default """
-    return decimate(x, ratio), rebin(y, ratio, do_average)
-# End of : From Alrik
+
+def flattener_(fixed_array, spikes_bool, wsize=3, n_neighbors=2):
+    flattened = copy.deepcopy(fixed_array)  # No overwrite of original array
+    corrected = np.array([False]*len(flattened))
+    # Flatten spectrum in region where spike were detected and fixed.
+    for i, spike in enumerate(spikes):
+        if spike:
+            for j in np.arange(max(0, i - n_neighbors), min(i + 1 + n_neighbors, len(fixed_array)), 1):
+                window = np.arange(max(0, j - wsize), min(j + 1 + wsize, len(fixed_array)), 1)  # Window around the spike.
+                flattened[j] = np.mean(fixed_array[window])  # Replace the value by the mean value of neighboring pixels.
+                corrected[j] = True
+    return flattened, corrected
 
 #######################################################################################################################
 ######################################################## CONVERSION ###################################################
@@ -262,19 +401,23 @@ def delta_nm2eV(delta_nm, Lambda, decimals=3):
         return round(abs(1000 * 1239.84193 * delta_nm / Lambda ** 2), decimals)
 
 
-def nm_cm(x_nm, laser_wavelength):
-    """Return the converted energy from nm to cm-1 relatively to the wavelength of the laser."""
+"""def nm_cm(x_nm, laser_wavelength):
+    "#"Return the converted energy from nm to cm-1 relatively to the wavelength of the laser."#"
     # We need some constants for the conversion.
     PLANK = scipy.constants.Planck
     EV = scipy.constants.eV
     SPEED_OF_LIGHT = scipy.constants.speed_of_light
     # Factor of conversion.
     factor = (PLANK/EV * SPEED_OF_LIGHT*100)**-1
-    return (nm_eV(laser_wavelength) - nm_eV(x_nm)) * factor
+    return (nm_eV(laser_wavelength) - nm_eV(x_nm)) * factor"""
+def nm_cm(x_nm, laser_wavelength):
+    """Return the converted energy from nm to raman shoft in cm-1 relatively to the wavelength of the laser."""
+    x_nm = np.array(x_nm)
+    return np.round(10**7*(1/laser_wavelength - 1/x_nm), 6)
 
 
 def cm_eV(x_cm, laser_wavelength):
-    """Return the converted energy from cm-1 to eV relatively to the wavelength of the laser."""
+    """Return the converted energy from raman shift cm-1 to eV."""
     # We need some constants for the conversion.
     PLANK = scipy.constants.Planck
     EV = scipy.constants.eV
@@ -284,10 +427,14 @@ def cm_eV(x_cm, laser_wavelength):
     return x_cm/factor
 
 
-def cm_nm(x_cm, laser_wavelength):
-    """Return the converted energy from cm-1 to nm relatively to the wavelength of the laser."""
+"""def cm_nm(x_cm, laser_wavelength):
+    "#""Return the converted energy from raman shift cm-1 to nm relatively to the wavelength of the laser."#""
     delta_eV = cm_eV(x_cm, laser_wavelength)
-    return nm_eV((nm_eV(laser_wavelength) - delta_eV))
+    return nm_eV((nm_eV(laser_wavelength) - delta_eV))"""
+def cm_nm(x_cm, laser_wavelength):
+    """Return the converted energy from raman shift cm-1 to nm relatively to the wavelength of the laser."""
+    x_cm = np.array(x_cm)
+    return np.round(1 / ((1/laser_wavelength) - x_cm/10**7), 6)
 
 
 def date(representation='literal'):
@@ -318,6 +465,9 @@ def date(representation='literal'):
 ####################################################### FIT FUNCTIONS #################################################
 #######################################################################################################################
 
+# In all these functions for fitting it is important to keep "A" as the extra counts above "B" the background because
+# when giving min and max bounds for fitting, "B" can change and we always want "A" to be that count above "B".
+# Otherwise if we use A = A - B and give A as the absolute counts, when B change sometime A can become negative.
 
 def linear(x, a, b):
     return a * x + b
@@ -329,7 +479,8 @@ def gaussian(x, sigma, mu, A, B):
 
 
 # linear & affine do the same but with different user input, I think that linear is easier to use because one doesn't
-# need to calculate the y-intercept ``b``
+# need to calculate the y-intercept ``b``. Correction: this is not true because we have to calculate ``B``, they are actually
+# the same functions.
 
 def gaussian_linear(x, sigma, mu, A, B, a):
     
@@ -369,7 +520,23 @@ def quadruple_gaussian(x, sigma1, mu1, A1, sigma2, mu2, A2, sigma3, mu3, A3, sig
 
 # In this formulae: A = 2/(pi*Gamma) , and B is the background
 def lorentzian(x, gamma, mu, A, B):
+    """A is the maximum of the peak, mu the center, and gamma the FWHM. B is background."""
     return 1 / (1 + (2 * (x - mu) / gamma) ** 2) * A + B
+
+# For lmfit I create another model, different from the built-in lorentzian model
+# this is because in the built-in model the parameter ``amp`` is the area under curve
+# and it is not easy to evaluate when giving initial values
+from lmfit import Model
+
+def lmfit_lorentzian(x, amplitude, center, sigma):
+    """``amplitude`` is the maximum of the peak, ``center`` the center and ``sigma`` the FWHM."""
+    return 1 / (1 + (2 * (x - center) / sigma) ** 2) * amplitude
+def LorentzianModel(prefix=''):
+    """
+    This is a function that returns the lmfit Model function with the prefix given.
+    ``amplitude`` is the maximum of the peak, ``center`` the center and ``sigma`` the FWHM.
+    """
+    return Model(lmfit_lorentzian, prefix=prefix)
 
 
 def lorentzian_linear(x, gamma, mu, A, B, a):
@@ -387,6 +554,11 @@ def double_lorentzian(x, gamma1, mu1, A1, gamma2, mu2, A2, B):
 def double_lorentzian_linear(x, gamma1, mu1, A1, gamma2, mu2, A2, B, a):
     return (1 / (1 + (2 * (x - mu1) / gamma1) ** 2) * A1) + (1 / (1 + (2 * (x - mu2) / gamma2) ** 2) * A2) + B + (a * x)
 
+def triple_lorentzian(x, gamma1, mu1, A1, gamma2, mu2, A2, gamma3, mu3, A3, B):
+    return (1 / (1 + (2 * (x - mu1) / gamma1) ** 2) * A1) + (1 / (1 + (2 * (x - mu2) / gamma2) ** 2) * A2) + (1 / (1 + (2 * (x - mu3) / gamma3) ** 2) * A3) + B
+
+def triple_lorentzian_linear(x, gamma1, mu1, A1, gamma2, mu2, A2, gamma3, mu3, A3, B, a):
+    return (1 / (1 + (2 * (x - mu1) / gamma1) ** 2) * A1) + (1 / (1 + (2 * (x - mu2) / gamma2) ** 2) * A2) + (1 / (1 + (2 * (x - mu3) / gamma3) ** 2) * A3) + B + (a * x)
 
 def cosinus(x, f, A, B):
     return A * np.cos(f * x) + B
@@ -448,15 +620,30 @@ def g2_irf(x, a=None, lambda1=None, lambda2=None, t0=None):
 
 
 def fit_polarization(x, A, B, phi, C):
+    """(A-C) * np.cos(B*x+phi)**2 + C"""
     return (A-C) * np.cos(B*x+phi)**2 + C
 
 
 def differential_reflectance(signal, reference):
+    """Return '(signal - reference) / signal'."""
     return (signal - reference)/(signal)
 
 
 def contrast_reflectance(signal, reference):
+    """Return '(signal - reference) / (signal + reference)'."""
     return (signal - reference)/(signal + reference)
+
+
+def exponential_negative(x, amplitude=1, decay=1, center=0):
+    cut_index = np.searchsorted(x, center)
+    if cut_index == len(x):
+        return np.zeros(len(x))
+    elif cut_index == 0:
+        return amplitude * np.exp(-x/decay)
+    else:
+        first_part = np.zeros(cut_index)
+        second_part = amplitude * np.exp(-(x[cut_index:]-center)/decay)
+        return np.concatenate((first_part, second_part))
 
 
 #######################################################################################################################
@@ -562,6 +749,39 @@ def get_last_filename_number_at_location(loc='/Users/pelini/L2C/Manip uPL UV 3K/
         return numbers[-1]
     else:
         return int(0)
+
+
+def save_image_as_textfile(image: mpl.image.AxesImage, filename, comment=None):
+    """
+    Saves an image generated by matplotlib.pyplot ``imshow`` method as a one column textfile
+    (the data is flatten for that purpose). One can add a comment at the beggining of the file
+    to specify the shape of the image --> example: comment='Image 50x50'.
+    """
+    data = image.get_array().data.ravel()
+    np.savetxt(filename, data, header=comment)
+
+
+def get_files_by_id(list_of_files, date, numbers):
+    """
+    Select and return filenames specified by ``date`` and ``numbers`` out of ``list_of_files``.
+
+    Parameters
+    ----------
+    list_of_files : iterable of strings.
+        List of filenames in which to search.
+
+    date : string.
+        The date for all ids seeked out. Must have the form ``210426`` for April 26th of 2021.
+
+    numbers: iterable of strings/integers.
+        The number identifiers of the seeked files. Ex: [01, 02, 10, 23], or ['01', '02', '10', '23'].
+    """
+    files = [file for file in list_of_files if len(file.split('_')) > 5]  # Filter file that are not pure datafile saved during experiment
+    new_list = []
+    for file in files:
+        if file.split('_')[-2] == date and len(file.split('_')[-1]) == 2 and int(file.split('_')[-1]) in numbers:
+            new_list.append(file)
+    return new_list
 
 
 #######################################################################################################################
@@ -1011,6 +1231,49 @@ def second_axis(ax, which='x'):
     return new_axis
 
 
+from pywinspec import winspec
+def plot(file: str, folder: str=None, ax=None, figsize: tuple=(8, 6), transf_func=None, **kwargs):
+    """Plot a single file of data by taking the first two columns. Can be .txt or .SPE files. ``transf_func`` is a
+    transformation for the x values. kwargs are passed to plt.plot()"""
+    def load_txt(folder, file):
+        x, y, *_ = np.loadtxt(folder+file, unpack=True)
+        return x, y
+    def load_spe(folder, file):
+        datafile = winspec.SpeFile(folder+file)
+        x, y = datafile.xaxis, datafile.data
+        y = y.reshape(max(y.shape))
+        return x, y
+
+    if folder is None:
+        if file.startswith('/'):
+            folder = ""
+        else:
+            folder = "./"
+    elif not folder.endswith('/'):
+        folder += '/'
+    # Extract the data
+    if file.endswith('.txt'):
+        x, y = load_txt(folder, file)
+    elif file.endswith('.SPE'):
+        x, y = load_spe(folder, file)
+    else:
+        try:
+            x, y = load_txt(folder, file+'.txt')
+        except (FileNotFoundError, OSError):
+            try:
+                x, y = load_spe(folder, file+'.SPE')
+            except (FileNotFoundError, OSError):
+                raise ValueError('Only .txt or .SPE file can be processed.')
+
+    if transf_func is not None:
+        x = transf_func(x)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        ax = ax
+    ax.plot(x, y, **kwargs)
+
+
 #######################################################################################################################
 ################################### FUNCTIONS FOR PANDA DATAFRAME CONSTRUCTION FROM DATAFILES #########################
 ################################################## AND PANDA RELATED FUNCTIONS ########################################
@@ -1213,7 +1476,7 @@ def highlight_row_by_name(s, names, color):
         return ['background-color: white'] * len(s)
 
 
-# I made the one below during postdoc at Grenoble
+# I made the ones below during postdoc at Grenoble
 
 def df_from_files(folder, files, fmt='txt', columns=['x', 'y']):
     """Computes a dataframe from two-columns data files, for each file in ``files``.
@@ -1222,7 +1485,8 @@ def df_from_files(folder, files, fmt='txt', columns=['x', 'y']):
     
     Parameters
     ----------
-    folder : complete path to folder.
+    folder : complete path to folder. To ignore this parameter just put ``""`` as value, for example
+        when the full path is contained in the file name already.
     
     files : sequence of file names to extract data from.
     
@@ -1236,9 +1500,9 @@ def df_from_files(folder, files, fmt='txt', columns=['x', 'y']):
     xx, yy = [], []
     for file in files:
         if fmt is None:
-            x, y = np.loadtxt(folder+file, unpack=True)
+            x, y = np.loadtxt(folder+file, unpack=True, comments='Frame')  # for trivista files
         else:
-            x, y = np.loadtxt(folder+file+'.'+fmt, unpack=True)
+            x, y = np.loadtxt(folder+file+'.'+fmt, unpack=True, comments='Frame')
         xx.append(x)
         yy.append(y)
         
@@ -1248,9 +1512,10 @@ def df_from_files(folder, files, fmt='txt', columns=['x', 'y']):
     #df.insert(1, 'y', yy)
     return df
 
+from collections import abc
 
-def df_from_bsweep(folder, file, B_init, B_final, step, CCD_nb_pixel=1340):
-    """Computes a dataframe from a file associated to a sweep in magnetic field.
+def df_from_bsweep(folder, file, B_init=None, B_final=None, step=None, bvalues=None, CCD_nb_pixel=1340):
+    """Computes a dataframe from a file associated to a sweep in magnetic field and sort dataframe by B values.
 
     The file should contain several spectra at different field.
 
@@ -1258,19 +1523,38 @@ def df_from_bsweep(folder, file, B_init, B_final, step, CCD_nb_pixel=1340):
     ----------
     folder: complete path to folder.
 
-    file: name of the file.
+    file: name of the file. Can be a list of files.
 
     B_init, B_final: value of initial and final magnetic field.
 
     step: the step in magnetic field in the sweep.
 
+    bvalues: list of magnetic field values.
+        Use this if the data file is a set of spectra from irregular values of magnetic field.
+        Ex: 0T, 1T, 2T, 3T, 4T, 6T, 10T, 15T, 20T --> bvalues = [0, 1, 2, 3, 4, 6, 10, 15, 20].
+
     CCD_nb_pixel: number of pixels on the CCD. default to 1340, standard at LNCMI-G.
-    
+
     """
-    number_of_steps = int(abs((B_final - B_init)/step) + 1)
-    B_values = np.linspace(B_init, B_final, number_of_steps) 
+    if all((element is not None for element in [B_init, B_final, step])):
+        number_of_steps = int(abs((B_final - B_init)/step) + 1)
+        B_values = np.linspace(B_init, B_final, number_of_steps)
+    elif bvalues is not None:
+        number_of_steps = len(bvalues)
+        B_values = bvalues
+    else:
+        raise ValueError("Set either ``B_init``,``B_final`` and ``step` values or provide a ``bvalues`` list.")
     # Extract the spectra.
-    col_1, col_2 = np.loadtxt(folder+file+'.txt', unpack=True)
+    if isinstance(file, str):
+        col_1, col_2 = np.loadtxt(folder+file+'.txt', unpack=True, comments='Frame')
+    elif isinstance(file, abc.Iterable):
+        xx, yy = [], []
+        for f in file:
+            col_1, col_2 = np.loadtxt(folder+f+'.txt', unpack=True, comments='Frame')
+            xx.append(col_1)
+            yy.append(col_2)
+        col_1, col_2 = np.concatenate(xx), np.concatenate(yy)
+
     col_1 = np.reshape(col_1, (number_of_steps, CCD_nb_pixel))
     col_2 = np.reshape(col_2, (number_of_steps, CCD_nb_pixel))
     # Create the list of the different quantities.
@@ -1306,7 +1590,7 @@ def df_from_sweep(folder, file, parameter_name, init_val=None, final_val=None, s
     
     """
     # Extract the spectra.
-    col_1, col_2 = np.loadtxt(folder+file+'.txt', unpack=True)
+    col_1, col_2 = np.loadtxt(folder+file+'.txt', unpack=True, comments='Frame')
 
     number_of_steps = int(np.floor(len(col_1)/CCD_nb_pixel))
     #number_of_steps = int(abs((final_val - init_val)/step) + 1)
@@ -1338,7 +1622,7 @@ def df_from_sweep(folder, file, parameter_name, init_val=None, final_val=None, s
     return df
 
 
-def plot_df(df, columns=None, row_selection=None, range_selection=None, ax=None, **kwargs):
+def plot_df(df, columns=None, row_selection=None, range_selection=None, ax=None, transf_func=None, **kwargs):
     """A simple routine to plot data from dataframe by selecting rows with ``selection``.
     
     Paramaters
@@ -1357,6 +1641,8 @@ def plot_df(df, columns=None, row_selection=None, range_selection=None, ax=None,
         - slice of index range. Ex: slice(300, 1500) plot between the 600th and 1500th pixel.
 
     ax : axes on which to plot. Create a new figure and axes if None.
+
+    transf_func : function that apply a transformation on ydata before plotting.
 
     **kwargs: all additional keyword arguments are passed to the ``plt.plot`` call.
     
@@ -1378,10 +1664,12 @@ def plot_df(df, columns=None, row_selection=None, range_selection=None, ax=None,
         max_x = find_nearest(serie_1[0], range_selection[1])[0]
         range_selection = slice(min_x, max_x)
     # Let's plot !
+    if transf_func is None:
+        transf_func = lambda x: x
     if ax == None:
         fig, ax = plt.subplots(figsize=(10, 6))
     for (x, y) in zip(serie_1, serie_2):
-        ax.plot(x[range_selection], y[range_selection], **kwargs)
+        ax.plot(x[range_selection], transf_func(y[range_selection]), **kwargs)
 
 
 def df_extract(df, **kw_col_values):
@@ -1436,3 +1724,137 @@ def df_savetxt(df, columns, location_and_name, fmt='%f'):
     yy = np.asarray([PL for PL in df[columns[1]]]).ravel()
     np.savetxt(location_and_name, np.column_stack((xx, yy)), fmt=fmt)
     
+
+#######################################################################################################################
+############################################# LMFIT HELPER FUNCTIONS ##################################################
+#######################################################################################################################
+
+def get_popt(result_fit, prefix=None):
+    """Helper function to use with lmfit package.
+
+    Extract the parameters value from a result of a fit with a lmfit model.
+    With the function curve_fit of the module scipy.optimize, one is use to retrieve the optimal values of
+    a parameters with 'popt, pcov' and use them to plot the result. In lmfit, it is not available directly,
+    so this functions address this issue.
+
+    Parameters
+    ----------
+    result_fit : ``ModelResult``
+        The object returned by the method 'model.fit'
+
+    prefix : str
+        The prefix given for a single function in the model to fit.
+
+
+    Return
+    ------
+
+    Dictionary of parameter name and value.
+
+    """
+    #params_value = {}
+    #number_params = len(result_fit.model.param_names)
+    #for (pname, param) in result_fit.params.items():
+    #    params_value[pname] = param.value
+    #params_value = {key: value for i, (key, value) in enumerate(params_value.items()) if i < number_params}
+    params_value = result_fit.best_values
+    if prefix is not None:
+        params_value = {
+            key[len(prefix):]: value for (key, value) in params_value.items() if key.startswith(prefix)
+        }
+    return params_value
+
+#####
+# The two functions below I don't use them anymore
+def get_param_value(name_param, list_of_results):
+    """list of results is a list of lmfit ``ModelResult``."""
+    values = []
+    stderrs = []
+    for result in list_of_results:
+        values.append(result.params[name_param].value)
+    return values
+
+def get_param_stderr(name_param, list_of_results):
+    stderrs = []
+    for result in list_of_results:
+        stderrs.append(result.params[name_param].stderr)
+    return stderrs
+#####
+
+
+from collections.abc import Iterable
+
+def lmfit_get_values(model_result, parameters) -> list:
+    if isinstance(parameters, Iterable):
+        values = []
+        for param in parameters:
+            val = model_result.params[param].value
+            values.append(val)
+    elif isinstance(parameters, str):
+        values = [model_result.params[parameters].value]
+    return values
+
+def lmfit_get_stderrors(model_result, parameters) -> list:
+    if isinstance(parameters, Iterable):
+        values = []
+        for param in parameters:
+            val = model_result.params[param].stderr
+            values.append(val)
+    elif isinstance(parameters, str):
+        values = [model_result.params[parameters].stderr]
+    return values
+
+def lmfit_savetxt(list_of_result, list_of_variable, params_to_save, path_and_filename, name_variable=None, save_errors=False, **kwargs):
+    """Save to a textfile the selected parameters from lmfit fits.
+
+    Parameters
+    ----------
+    list_of_result : Iterable[ModelResult]
+        Iterable (list) of lmfit result from fit.
+
+    list_of_variable : list
+        List of the variable values.
+        Example: 10 fit for magnetic field from 1 to 10T, list_of_variable = np.arange(1, 11, 1).
+
+    params_to_save : list
+        List of choosen parameters from the fit to be saved.
+        Example: A two lorentzian function is used and I want only the center of the lorentzian:
+            params_to_save = ['p1center', 'p2center'].
+
+    path_and_filename : str
+        Path and name of the file to be saved. If the one wants to save in current directory just give a name.
+
+    name_variable : str
+        The name of the variable that changes between each result of ``list_of_result``.
+        Example: 10 fit for magnetic field from 1 to 10T, variable = 'B'.
+
+    save_errors : bool
+        Weither or not to save the standard errors for each parameter.
+
+    **kwargs : will be passed to ``numpy.savetxt``
+
+    """
+
+    values = [lmfit_get_values(result, params_to_save) for result in list_of_result]  # one list of all peaks value for each pressure
+    values = np.transpose(values)  # one list of value for each pressure for each peak
+
+    if save_errors:
+        stderrors = [lmfit_get_stderrors(result, params_to_save) for result in list_of_result]
+        stderrors = np.transpose(stderrors)
+        data_to_save = tuple([list_of_variable]) + tuple([arr for sublist in zip(values, stderrors) for arr in sublist])
+        data_to_save = np.column_stack(data_to_save)
+    else:
+        data_to_save = tuple([list_of_variable]) + tuple(values)
+        data_to_save = np.column_stack(data_to_save)
+
+    if not save_errors:
+        header = ("{var} , " + ("{} , "*len(params_to_save))[:~2]).format(var=name_variable, *params_to_save)
+    else:
+        header = ("{var} , " + ("{} , stderr_{} , "*len(params_to_save))[:~2]).format(var=name_variable, *np.concatenate([[item]*2 for item in params_to_save]))
+
+    path_and_filename = path_and_filename if path_and_filename.endswith('.txt') else path_and_filename + '.txt'
+    np.savetxt(path_and_filename, data_to_save, header=header, fmt='%10f')
+
+
+
+
