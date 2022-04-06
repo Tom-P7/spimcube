@@ -1,8 +1,9 @@
 import math as math
 import numpy as np
 import re
+import pandas as pd
 
-import spimcube.functions as fct
+import indev.functions as fct
 
 def initialization(path, basename):
     """Return a dictionary with: NStepsX, NStepsY, Npixel, Matrix, tab_of_lambda, Xstep, Ystep, Xrange, Yrange."""
@@ -92,7 +93,6 @@ def define_space_range(Xmin, Xmax, Ymin, Ymax, RangeXY):
     return {'Xpmin':Xpmin, 'Xpmax':Xpmax, 'Ypmin':Ypmin, 'Ypmax':Ypmax}
 
 
-
 def initialization_Bsweep(path, basename, B_init, B_final, B_step, CCD_nb_pixels=1340):
     """Return a dictionary with: Matrix, tab_of_lambda, B_range, B_step, Npixel."""
     
@@ -100,7 +100,7 @@ def initialization_Bsweep(path, basename, B_init, B_final, B_step, CCD_nb_pixels
     
     number_Bsweep = int(np.rint((B_final - B_init) / B_step + 1))
     
-    B_range = np.linspace(B_init, B_final, number_Bsweep, dtype='>f4') # building 1D array of B values
+     # building 1D array of B values
 
     column_1, column_2 = np.loadtxt(filename, unpack=True)
 
@@ -109,6 +109,25 @@ def initialization_Bsweep(path, basename, B_init, B_final, B_step, CCD_nb_pixels
     Matrix = column_2.reshape(number_Bsweep, CCD_nb_pixels)
 
     return {'Matrix': Matrix, 'tab_of_lambda':tab_of_lambda, 'B_range':B_range, 'B_step':B_step, 'Npixel':CCD_nb_pixels}
+
+
+def df_from_bsweep(folder, file, B_init, B_final, step, CCD_nb_pixels=1340):
+    """
+    Return a dataframe from a sweep in magnetic field, i.e from a file containing several spectra at different field.
+    """
+    number_of_steps = int((B_final - B_init)/step + 1)
+    B_values = np.linspace(B_init, B_final, number_of_steps, dtype='>f4') 
+    # Extract the spectra.
+    col_1, col_2 = np.loadtxt(folder+file+'.txt', unpack=True)
+    col_1 = np.reshape(col_1, (number_of_steps, CCD_nb_pixels))
+    col_2 = np.reshape(col_2, (number_of_steps, CCD_nb_pixels))
+    # Create the list of the different quantities.
+    wavelength = [list(x) for x in col_1]
+    intensity = [list(y) for y in col_2]
+    energy = [list(fct.nm_eV(x)) for x in wavelength]
+
+    df = pd.DataFrame(data={'B': B_values, 'wavelength': wavelength, 'energy': energy, 'intensity': intensity})
+    return df
     
     
 #    Goal: detect saturation phenomenon

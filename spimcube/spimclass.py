@@ -3,12 +3,14 @@ import copy
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.widgets import (AxesWidget, Slider, Button, RadioButtons, CheckButtons, Cursor, MultiCursor, RectangleSelector, Lasso)
+from matplotlib.widgets import (AxesWidget, Slider, Button, RadioButtons, CheckButtons, Cursor, MultiCursor,
+                                RectangleSelector, Lasso)
 from matplotlib import path
 from matplotlib.collections import RegularPolyCollection
 import numpy as np
 import statistics as stat
 
+from pywinspec.winspec import SpeFile
 import despike
 import indev.functions as fct
 
@@ -17,7 +19,7 @@ class Spim:
     """This class creates and formats the data cube (SPIM) to be explored and used with the ``SpimInterface`` object.
     
     The data cube is extracted from rawdata files by using one of the 'initialization' methods.
-    Main attributes are the shaped data cube ``matrix`` and the list of wavelengths ``tab_lambda``.
+    Main attributes are the shaped data cube ``matrix`` and the list of wavelengths ``xaxis_values``.
     The created object contains also all the metadata declared as attributes.
     A method ``intensity_map`` is defined to compute intensity integrated image from the data cube.
 
@@ -77,7 +79,7 @@ class Spim:
         
         """
         self.path = path
-        self.filename = filename
+        self.filename = filename[:-4] if filename.endswith('.txt') else filename
 
         # Scan attributes
         self.scan_direction = scan_direction
@@ -86,7 +88,7 @@ class Spim:
 
         # Data attributes
         self.matrix = None
-        self.tab_lambda = None
+        self.xaxis_values = None
 
         # Attributes of the initialization
         self.start_x, self.start_y = 0, 0
@@ -155,8 +157,8 @@ class Spim:
 
         # Extract the list of wavelengths on the spectro CCD.
         lambda_key = file.files[3:]
-        self.tab_lambda = np.array(list(map(lambda s: round(float(s) * 1e9, ndigits=3), lambda_key)))
-        if len(self.tab_lambda) != self.CCD_nb_pixel:
+        self.xaxis_values = np.array(list(map(lambda s: round(float(s) * 1e9, ndigits=3), lambda_key)))
+        if len(self.xaxis_values) != self.CCD_nb_pixel:
             raise ValueError(
                 "The number of CCD pixels given in metadata does not match the number of wavelengths in data.")
 
@@ -204,7 +206,7 @@ class Spim:
         self._shape3Dmatrix(data)
 
         # Load Lambda file in float.
-        self.tab_lambda = np.loadtxt(
+        self.xaxis_values = np.loadtxt(
             lambda_file, encoding='latin1', converters={0: lambda s: s.replace(",", ".")}
         )
 
@@ -246,7 +248,7 @@ class Spim:
 
         # Load data. ``column_1`` is wavelength, ``column_2`` is intensity.
         usecols = (0, 1) if not data_reversed else (1, 0)
-        column_1, column_2 = np.loadtxt(complete_path, unpack=True, usecols=usecols)
+        column_1, column_2 = np.loadtxt(complete_path, unpack=True, usecols=usecols, comments='Frame')
 
         # Find ``CCD_nb_pixel``.
         if CCD_nb_pixel == 'auto':
@@ -259,7 +261,7 @@ class Spim:
 
         # Fetch metadata with regex.
         if not all([xstep_number, ystep_number]):
-            pattern = r"(\w*)x(\w*)" + 'steps'  # Specific to how we write the filename.
+            pattern = r"(\w*)x(\w*)" + "steps"  # Specific to how we write the filename.
             values = re.findall(pattern, self.filename)
             if values:
                 self.xstep_number = int(values[0][0])
@@ -271,7 +273,7 @@ class Spim:
             self.ystep_number = ystep_number
 
         if not all([xstep_value, ystep_value]):
-            pattern = r"(\w*)x(\w*)" + 'mum'  # Specific to how we write the filename.
+            pattern = r"(\w*)x(\w*)" + "pixel"  # Specific to how we write the filename.
             values = re.findall(pattern, self.filename)
             if values:
                 self.xstep_value = int(values[0][0])
@@ -288,8 +290,29 @@ class Spim:
         # Reshape the matrix.
         self._shape3Dmatrix(column_2)
 
-        # Create the tab of wavelengths.
-        self.tab_lambda = column_1[0:self.CCD_nb_pixel]
+        # Create the list of x axis values.
+        self.xaxis_values = column_1[0:self.CCD_nb_pixel]
+
+        # Define default space range of the map.
+        self.define_space_range()
+
+    def initialization_spefile(self, xstep_number=None, ystep_number=None, xstep_value=None, ystep_value=None):
+        self.xstep_number = xstep_number
+        self.ystep_number = ystep_number
+        self.xstep_value = xstep_value
+        self.ystep_value = ystep_value
+
+        spefile = SpeFile(self.path + self.filename + '.SPE')
+        self.xaxis_values = spefile.xaxis
+        data = spefile.data
+
+        self.CCD_nb_pixel = data.shape[1]
+
+        # Check and fix incomplete scan.
+        flatten_data = self._fix_incomplete_scan(data)
+
+        # Reshape the matrix.
+        self._shape3Dmatrix(data)
 
         # Define default space range of the map.
         self.define_space_range()
@@ -352,13 +375,13 @@ class Spim:
         Note: in the present form, the intensity is normalized to the maximum into the range considered.
         
         """
-        center = self.tab_lambda[int(len(self.tab_lambda) / 2)] if center is None else center
-        width = 1 / 10 * (self.tab_lambda.max() - self.tab_lambda.min()) if width is None else width
+        center = self.xaxis_values[int(len(self.xaxis_values) / 2)] if center is None else center
+        width = 1 / 10 * (self.xaxis_values.max() - self.xaxis_values.min()) if width is None else width
         int_lambda_min = center - width / 2
         int_lambda_max = center + width / 2
         # The function ``find_nearest`` return the pixel number and the corresponding value in nm.
-        self.int_lambda_min = fct.find_nearest(self.tab_lambda, int_lambda_min)
-        self.int_lambda_max = fct.find_nearest(self.tab_lambda, int_lambda_max)
+        self.int_lambda_min = fct.find_nearest(self.xaxis_values, int_lambda_min)
+        self.int_lambda_max = fct.find_nearest(self.xaxis_values, int_lambda_max)
         # Integrate intensity over the chosen range of wavelength.
         image_data = np.sum(
             self.matrix[self.ypmin[0]:self.ypmax[0] + 1, self.xpmin[0]:self.xpmax[0] + 1,
@@ -377,7 +400,7 @@ class Spim:
     def _fix_incomplete_scan(self, array_to_fix):
         """Check whether or not the input data is as large as expected and fix it if necessary.
 
-        - If the input data set is smaller than the expected size accordingly to ``xstep_number`` and ``xstep_number``,
+        - If the input data set is smaller than the expected size accordingly to ``xstep_number`` and ``ystep_number``,
         then the data set is completed with zeros.
         - If it is larger, a ValueErrror is raised.
 
@@ -391,7 +414,7 @@ class Spim:
         if len(array_to_fix.ravel()) > expected_length:
             raise ValueError(
                 "The input data set is larger than the specified number of scan positions.\
-                Double-check ``xstep_number`` and ``xstep_number``.")
+                Double-check ``xstep_number`` and ``ystep_number``.")
         elif len(array_to_fix.ravel()) < expected_length:
             delta_length = expected_length - len(array_to_fix.ravel())
             patch_array = np.zeros(shape=delta_length)
@@ -550,9 +573,9 @@ class SpimInterface:
             raise ValueError('Spim is not an instance from the ``Spim`` class.')
         if lambda_init is None:
             try:
-                lambda_init = spim.tab_lambda[stat.mode(np.argmax(spim.matrix, axis=2).ravel())]
+                lambda_init = spim.xaxis_values[stat.mode(np.argmax(spim.matrix, axis=2).ravel())]
             except stat.StatisticsError:
-                lambda_init = spim.tab_lambda[np.argmax(spim.matrix[0, 0, :])]
+                lambda_init = spim.xaxis_values[np.argmax(spim.matrix[0, 0, :])]
         # ``spim`` is given as attribute in order to use it in the class methods that define widgets action.
         self.spim = spim
         self.scan_unit = spim.scan_unit
@@ -611,9 +634,9 @@ class SpimInterface:
         # Widgets definitions - attributes
         ## - Slider -
         self.slider_center = FancySlider(
-            ax__slider_center, 'Center\n[nm]', spim.tab_lambda.min() + 0.01, spim.tab_lambda.max(), valinit=lambda_init)
+            ax__slider_center, 'Center\n[nm]', spim.xaxis_values.min() + 0.01, spim.xaxis_values.max(), valinit=lambda_init)
         self.slider_width = FancySlider(
-            ax__slider_width, 'Width\n[nm]', 0.02, spim.tab_lambda.max() - spim.tab_lambda.min(), valinit=3)
+            ax__slider_width, 'Width\n[nm]', 0.02, spim.xaxis_values.max() - spim.xaxis_values.min(), valinit=3)
         self.slider_clim_min = FancySlider(
             ax__slider_clim_min, 'Min', 0, 1, valinit=0, orientation='vertical')
         self.slider_clim_max = FancySlider(
@@ -726,8 +749,8 @@ class SpimInterface:
         # --- ----------- ---
         # --- PL SPECTRUM ---
         # --- ----------- ---
-        self.spectrum, = self.ax_spectrum.plot(spim.tab_lambda, spim.matrix[0, 0, :], lw=1, c='darkviolet')
-        self.ax_spectrum.set_xlim(spim.tab_lambda.min(), spim.tab_lambda.max())
+        self.spectrum, = self.ax_spectrum.plot(spim.xaxis_values, spim.matrix[0, 0, :], lw=1, c='darkviolet')
+        self.ax_spectrum.set_xlim(spim.xaxis_values.min(), spim.xaxis_values.max())
         self.ax_spectrum.set_ylim(np.min(spim.matrix[0, 0, :]), np.max(spim.matrix[0, 0, :]))
         # Define vertical marker lines for the spectrum - attributes.
         prop1 = dict(ls='-', color='k', lw=0.7)
@@ -806,8 +829,8 @@ class SpimInterface:
         self.slider_clim_max.reset()
 
     def _set_full_range(self, _):
-        center = self.spim.tab_lambda[int(len(self.spim.tab_lambda) / 2)]
-        width = self.spim.tab_lambda.max() - self.spim.tab_lambda.min()
+        center = self.spim.xaxis_values[int(len(self.spim.xaxis_values) / 2)]
+        width = self.spim.xaxis_values.max() - self.spim.xaxis_values.min()
         self.slider_center.set_val(center)
         self.slider_width.set_val(width)
         self.image.set_data(self.spim.intensity_map(center, width))
@@ -816,7 +839,7 @@ class SpimInterface:
 
     def _delta_minus(self, _):
         # Calculate the spectrum average increment in wavelength.
-        increment = np.mean(np.diff(self.spim.tab_lambda))
+        increment = np.mean(np.diff(self.spim.xaxis_values))
         center = self.slider_center.val - increment
         width = self.slider_width.val
         self.slider_center.set_val(center)
@@ -824,7 +847,7 @@ class SpimInterface:
 
     def _delta_plus(self, _):
         # Calculate the spectrum average increment in wavelength.
-        increment = np.mean(np.diff(self.spim.tab_lambda))
+        increment = np.mean(np.diff(self.spim.xaxis_values))
         center = self.slider_center.val + increment
         width = self.slider_width.val
         self.slider_center.set_val(center)
@@ -863,9 +886,9 @@ class SpimInterface:
         x = []
         xunit = self.radiobutton_xunit.value_selected
         if xunit == 'nm':
-            x = self.spim.tab_lambda
+            x = self.spim.xaxis_values
         elif xunit == 'eV':
-            x = fct.nm_eV(self.spim.tab_lambda)
+            x = fct.nm_eV(self.spim.xaxis_values)
 
         # Rectangular selection.
         if self.rect_selector.get_active():
@@ -1009,7 +1032,7 @@ class SpimInterface:
 
     def _set_xunit(self, label):
         if label == 'nm':
-            x_nm = self.spim.tab_lambda
+            x_nm = self.spim.xaxis_values
             self.spectrum.set_xdata(x_nm)
             self.ax_spectrum.set_xlim(np.min(x_nm), np.max(x_nm))
             self.ax_spectrum.set_xlabel('Wavelength [nm]')
@@ -1017,7 +1040,7 @@ class SpimInterface:
             # Update markers positions.
             self._update_image(self)
         elif label == 'eV':
-            x_eV = fct.nm_eV(self.spim.tab_lambda)
+            x_eV = fct.nm_eV(self.spim.xaxis_values)
             self.spectrum.set_xdata(x_eV)
             self.ax_spectrum.set_xlim(np.min(x_eV), np.max(x_eV))
             self.ax_spectrum.set_xlabel('Energy [eV]')
@@ -1423,7 +1446,6 @@ class LassoSelectorFit:
         """
         Parameters
         ----------
-
         splitting : True if the calculation is on zeeman splitting, False if on full peak position
         """
         self.axes = ax
