@@ -10,9 +10,16 @@ from matplotlib.collections import RegularPolyCollection
 import numpy as np
 import statistics as stat
 
-from pywinspec.winspec import SpeFile
+try:
+    from pywinspec.winspec import SpeFile
+except ModuleNotFoundError as error:
+    print("This package will not work because pywinspec is not found.")
+except:
+    print(error.__class__.__name__)
+    print("This package will not work because pywinspec is not found.")
+    
 import despike
-import indev.functions as fct
+import spimcube.functions as fct
 
 
 class Spim:
