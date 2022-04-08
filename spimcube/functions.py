@@ -1231,47 +1231,53 @@ def second_axis(ax, which='x'):
     return new_axis
 
 
-from pywinspec import winspec
-def plot(file: str, folder: str=None, ax=None, figsize: tuple=(8, 6), transf_func=None, **kwargs):
-    """Plot a single file of data by taking the first two columns. Can be .txt or .SPE files. ``transf_func`` is a
-    transformation for the x values. kwargs are passed to plt.plot()"""
-    def load_txt(folder, file):
-        x, y, *_ = np.loadtxt(folder+file, unpack=True)
-        return x, y
-    def load_spe(folder, file):
-        datafile = winspec.SpeFile(folder+file)
-        x, y = datafile.xaxis, datafile.data
-        y = y.reshape(max(y.shape))
-        return x, y
+try:
+    from pywinspec import winspec
+except ModuleNotFoundError as error:
+    print("The function ``plot`` will not be available because pywinspec is not found.")
+except:
+    print(error.__class__.__name__)
+else:
+    def plot(file: str, folder: str=None, ax=None, figsize: tuple=(8, 6), transf_func=None, **kwargs):
+        """Plot a single file of data by taking the first two columns. Can be .txt or .SPE files. ``transf_func`` is a
+        transformation for the x values. kwargs are passed to plt.plot()"""
+        def load_txt(folder, file):
+            x, y, *_ = np.loadtxt(folder+file, unpack=True)
+            return x, y
+        def load_spe(folder, file):
+            datafile = winspec.SpeFile(folder+file)
+            x, y = datafile.xaxis, datafile.data
+            y = y.reshape(max(y.shape))
+            return x, y
 
-    if folder is None:
-        if file.startswith('/'):
-            folder = ""
+        if folder is None:
+            if file.startswith('/'):
+                folder = ""
+            else:
+                folder = "./"
+        elif not folder.endswith('/'):
+            folder += '/'
+        # Extract the data
+        if file.endswith('.txt'):
+            x, y = load_txt(folder, file)
+        elif file.endswith('.SPE'):
+            x, y = load_spe(folder, file)
         else:
-            folder = "./"
-    elif not folder.endswith('/'):
-        folder += '/'
-    # Extract the data
-    if file.endswith('.txt'):
-        x, y = load_txt(folder, file)
-    elif file.endswith('.SPE'):
-        x, y = load_spe(folder, file)
-    else:
-        try:
-            x, y = load_txt(folder, file+'.txt')
-        except (FileNotFoundError, OSError):
             try:
-                x, y = load_spe(folder, file+'.SPE')
+                x, y = load_txt(folder, file+'.txt')
             except (FileNotFoundError, OSError):
-                raise ValueError('Only .txt or .SPE file can be processed.')
+                try:
+                    x, y = load_spe(folder, file+'.SPE')
+                except (FileNotFoundError, OSError):
+                    raise ValueError('Only .txt or .SPE file can be processed.')
 
-    if transf_func is not None:
-        x = transf_func(x)
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        ax = ax
-    ax.plot(x, y, **kwargs)
+        if transf_func is not None:
+            x = transf_func(x)
+        if ax is None:
+            fig, ax = plt.subplots(figsize=figsize)
+        else:
+            ax = ax
+        ax.plot(x, y, **kwargs)
 
 
 #######################################################################################################################
