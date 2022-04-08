@@ -3,7 +3,7 @@ import numpy as np
 import re
 import pandas as pd
 
-import indev.functions as fct
+import spimcube.functions as fct
 
 def initialization(path, basename):
     """Return a dictionary with: NStepsX, NStepsY, Npixel, Matrix, tab_of_lambda, Xstep, Ystep, Xrange, Yrange."""
