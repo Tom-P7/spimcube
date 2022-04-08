@@ -16,7 +16,7 @@ setup(name='spimcube',
       
       packages=['spimcube'],
       python_requires='>=3.6',
-      install_requires=['matplotlib>=3.1', 'colorcet', 'numpy', 'despike'],
+      install_requires=['matplotlib>=3.1', 'numpy', 'scipy', 'pandas', 'colorcet', 'despike', 'lmfit'],
       license='MIT',
       classifiers=[
         "Programming Language :: Python :: 3",
