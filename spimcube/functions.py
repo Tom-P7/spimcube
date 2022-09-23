@@ -525,19 +525,40 @@ def lorentzian(x, gamma, mu, A, B):
 
 # For lmfit I create another model, different from the built-in lorentzian model
 # this is because in the built-in model the parameter ``amp`` is the area under curve
-# and it is not easy to evaluate when giving initial values
+# and it is not easy to evaluate when giving initial values. In this one, 'amp' is the max of the peak.
+# I do the same for GaussianModel.
 from lmfit import Model
 
-def lmfit_lorentzian(x, amplitude, center, sigma):
+def lmfit_lorentzian(x, amplitude=1.0, center=0.0, sigma=1.0):
     """``amplitude`` is the maximum of the peak, ``center`` the center and ``sigma`` the FWHM."""
-    return 1 / (1 + (2 * (x - center) / sigma) ** 2) * amplitude
-def LorentzianModel(prefix=''):
-    """
-    This is a function that returns the lmfit Model function with the prefix given.
-    ``amplitude`` is the maximum of the peak, ``center`` the center and ``sigma`` the FWHM.
-    """
-    return Model(lmfit_lorentzian, prefix=prefix)
+    return 1 / (1 + (2 * (x - center) / max(1.0e-15, sigma)) ** 2) * amplitude
 
+class LorentzianModel(Model):
+    """``amplitude`` is the maximum of the peak, ``center`` the center and ``sigma`` the FWHM."""
+
+    def __init__(self, independent_vars=['x'], prefix='', nan_policy='raise',
+                 **kwargs):
+        kwargs.update({'prefix': prefix, 'nan_policy': nan_policy,
+                       'independent_vars': independent_vars})
+        super().__init__(lmfit_lorentzian, **kwargs)
+
+def lmfit_gaussian(x, amplitude, center, sigma):
+    """``amplitude`` is the maximum of the peak, ``center`` the center and ``sigma`` the FWHM."""
+    return np.exp(-((x - center) / np.sqrt(2 * sigma ** 2)) ** 2) * amplitude
+
+class GaussianModel(Model):
+    """
+    ``amplitude`` is the maximum of the peak, ``center`` the center and ``sigma`` the standard deviation.
+    The FWHM is given by: 2*sqrt(2*ln(2))*sigma.
+    The area under the gaussian function is given by: amplitude*sigma*np.sqrt(2*np.pi).
+
+    """
+    def __init__(self, independent_vars=['x'], prefix='', nan_policy='raise',
+                 **kwargs):
+        kwargs.update({'prefix': prefix, 'nan_policy': nan_policy,
+                       'independent_vars': independent_vars})
+        super().__init__(lmfit_gaussian, **kwargs)
+        
 
 def lorentzian_linear(x, gamma, mu, A, B, a):
     return (1 / (1 + (2 * (x - mu) / gamma) ** 2) * A + B) + (a * x)
@@ -876,7 +897,7 @@ def several_spectrum_plot(data, list_of_index, xdata=None, tab_of_lambda=None, l
 
 
 def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_for_plot_function={}, label=True,
-                  bounds=None, **fit_functions):
+                  bounds=None, limits_for_fitting=None, **fit_functions):
     """
     Plot y versus x with the plot_function given (default to ``plt.plot``), and compute and plot the fits with the
     fit functions given, display the fit parameters in the label.
@@ -899,9 +920,13 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
         value : list of guess values for the parameters of the fit function
 
     bounds : 2-tuple of array-like or scalar.
+        Bounds for the fit parameters.
         If array: must have length equal to the number of parameters.
         If scalar: same bound for each parameter.
         If 'None' defaults to no bounds (-np.inf, np.inf).
+
+    limits_for_fitting: Iterable of two elements: min and max.
+        Exemple: [670, 720], (670, 720), [1.71, 1.73].
                         
     fit_functions : the 'key' must be the name of the fit function and the 'value' the proper function. 
         Example:  gaussian=fct.gaussian, lorentzian_linear=fct.lorentzian_linear
@@ -909,6 +934,8 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
     Return a 2-tuple of dictionnary. The first one is ``result_fit_parameters`` in which the key indicates
     the fit function and the value is an array of fitted parameters. The second one is ``result_fit_parameters_err``
     for that return "np.sqrt(np.diag(pcov))" where pcov is the covariance matrix return by ``scipy.optimize.curve_fit``.
+
+    Error: when fit does not suceed, ``RuntimeError`` is handled and None is return.
 
     """
     def make_label(fit_function_name, popt):
@@ -941,13 +968,19 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
         ax.set_ylim(bottom=ybottom, top=ytop)
     x = np.array(x) 
     y = np.array(y)
-    xfit = np.linspace(np.nanmin(x), np.nanmax(x), 10 * len(x))
 
     plot_function = plt.plot if plot_function is None else plot_function
     if plot_function == plt.plot:
-        plot_function(x, y, c=colors[0], **kwarg_for_plot_function)
+        ax.plot(x, y, c=colors[0], **kwarg_for_plot_function)
     else:
         plot_function(x, y, **kwarg_for_plot_function)
+
+    if limits_for_fitting:
+        mask = (x>limits_for_fitting[0])&(x<limits_for_fitting[1])
+        x = x[mask]
+        y = y[mask]
+
+    xfit = np.linspace(np.nanmin(x), np.nanmax(x), 10 * len(x))
 
     import warnings
     warnings.filterwarnings("error")
@@ -1019,7 +1052,7 @@ def plot_with_fit(x, y, ax=None, plot_function=None, initial_guess=None, kwarg_f
                       name, "fit standard deviation errors: ", np.sqrt(np.diag(pcov)),
                       )
     if label:
-        plt.legend(loc=(0, 1.01))  # loc='upper center', bbox_to_anchor=[0.5, 1.13])
+        ax.legend(loc=(0, 1.01))  # loc='upper center', bbox_to_anchor=[0.5, 1.13])
             
     warnings.filterwarnings('default')
     return result_fit_parameters, result_fit_parameters_err
@@ -1280,6 +1313,114 @@ else:
         ax.plot(x, y, **kwargs)
 
 
+import matplotlib.colors as mcolors
+import matplotlib.patches as patches
+from PIL import Image
+from PIL import ImageDraw
+from PIL import ImageFilter
+
+def zfunc(x, y, fill_color='k', alpha=1.0):
+    scale = 10
+    x = (x*scale).astype(int)
+    y = (y*scale).astype(int)
+    xmin, xmax, ymin, ymax = x.min(), x.max(), y.min(), y.max()
+
+    w, h = xmax-xmin, ymax-ymin
+    z = np.empty((h, w, 4), dtype=float)
+    rgb = mcolors.colorConverter.to_rgb(fill_color)
+    z[:,:,:3] = rgb
+
+    # Build a z-alpha array which is 1 near the line and 0 at the bottom.
+    img = Image.new('L', (w, h), 0)
+    draw = ImageDraw.Draw(img)
+    xy = (np.column_stack([x, y]))
+    xy -= xmin, ymin
+    # Draw a blurred line using PIL
+    draw.line(tuple(map(tuple, xy.tolist())), fill=255, width=15)
+    img = img.filter(ImageFilter.GaussianBlur(radius=100))
+    # Convert the PIL image to an array
+    zalpha = np.asarray(img).astype(float)
+    zalpha *= alpha/zalpha.max()
+    # make the alphas melt to zero at the bottom
+    n = zalpha.shape[0] // 4
+    zalpha[:n] *= np.linspace(0, 1, n)[:, None]
+    z[:,:,-1] = zalpha
+    return z
+
+
+def gradient_fill(x, y, fill_color=None, ax=None, zfunc=None, **kwargs):
+    """Plot a line with a linear alpha gradient filled beneath it.
+
+    Parameters
+    ----------
+    x, y : array-like
+        The data values of the line.
+
+    fill_color : a matplotlib color specifier (string, tuple) or None
+        The color for the fill. If None, the color of the line will be used.
+
+    ax : a matplotlib Axes instance
+        The axes to plot on. If None, the current pyplot axes will be used.
+
+    zfunc : function
+        A zfunc like defined above, but I don't like the effect. Better to set to None.
+
+    **kwargs: Additional arguments are passed on to matplotlib's ``plot`` function.
+
+    Returns
+    -------
+    line : a Line2D instance
+        The line plotted.
+
+    im : an AxesImage instance
+        The transparent gradient clipped to just the area beneath the curve.
+
+    """
+    if ax is None:
+        ax = plt.gca()
+
+    line, = ax.plot(x, y, **kwargs)
+    if fill_color is None:
+        fill_color = line.get_color()
+
+    zorder = line.get_zorder()
+    alpha = line.get_alpha()
+    alpha = 1.0 if alpha is None else alpha
+
+    if zfunc is None:
+        h, w = 100, 1
+        z = np.empty((h, w, 4), dtype=float)
+        rgb = mcolors.colorConverter.to_rgb(fill_color)
+        z[:,:,:3] = rgb
+        z[:,:,-1] = np.linspace(0, alpha, h)[:,None]
+    else:
+        z = zfunc(x, y, fill_color=fill_color, alpha=alpha)
+        print(z.shape)
+    xmin, xmax, ymin, ymax = x.min(), x.max(), y.min(), y.max()
+    im = ax.imshow(z, aspect='auto', extent=[xmin, xmax, ymin, ymax],
+                   origin='lower', zorder=zorder)
+
+    xy = np.column_stack([x, y])
+    xy = np.vstack([[xmin, ymin], xy, [xmax, ymin], [xmin, ymin]])
+    clip_path = patches.Polygon(xy, facecolor='none', edgecolor='none', closed=True)
+    ax.add_patch(clip_path)
+    im.set_clip_path(clip_path)
+    ax.autoscale(True)
+    return line, im
+
+
+def plot_grid(folder, filenames, ncol=4, legend=True, width_per_column=5, width_per_row=4, **kwargs):
+    nrow = len(filenames)//ncol if len(filenames)%ncol == 0 else len(filenames)//ncol + 1
+    fig, axes = plt.subplots(nrow, ncol, figsize=(ncol*width_per_column, nrow*width_per_row))
+    for (ax, file) in zip(axes.flatten(), filenames):
+        plot(folder+file, ax=ax, label='_'.join(file.split('_')[~1:]), **kwargs)
+        if legend:
+            ax.legend()
+    # Set the empty axes not visible.
+    if len(filenames)%ncol != 0:
+        for ax in axes.flatten()[-(ncol-len(filenames)%ncol):]:
+            ax.set_visible(False)
+
 #######################################################################################################################
 ################################### FUNCTIONS FOR PANDA DATAFRAME CONSTRUCTION FROM DATAFILES #########################
 ################################################## AND PANDA RELATED FUNCTIONS ########################################
@@ -1452,6 +1593,7 @@ def make_DataFrame(list_of_filenames, files_location, format_, version='old', un
     return df
 
 
+# This function is very complicated for no reason, same result can be achieved with >> dataframe[parameter].to_list()
 def list_values_of_parameter(dataframe, parameter):
     """Return a list of all values of the parameter from the dataframe."""
     index_of_parameter = dataframe['{}'.format(parameter)].value_counts().index
@@ -1573,11 +1715,11 @@ def df_from_bsweep(folder, file, B_init=None, B_final=None, step=None, bvalues=N
     return df
 
 
-def df_from_sweep(folder, file, parameter_name, init_val=None, final_val=None, step=None, CCD_nb_pixel=1340):
+def df_from_sweep(folder, file, parameter_name, init_val=None, final_val=None, step=None, pvalues=None, CCD_nb_pixel=1340):
     """Computes a dataframe from a file associated to a sweep of any parameter.
 
-    The file should contain several spectra at different value of the parameter, each value
-    separated by a constant step. It is possible to specify only several parameters or none of them, they will be
+    The file should contain several spectra at different value of the parameter.
+    It is possible to specify only several parameters or none of them, they will be
     infered from the specified parameters or arbitrary defined.
 
     Parameters
@@ -1592,28 +1734,34 @@ def df_from_sweep(folder, file, parameter_name, init_val=None, final_val=None, s
 
     step: the step between each value of the parameter.
 
+    pvalues: list of parameters values. Takes precedence on init, finial and step values.
+
     CCD_nb_pixel: number of pixels on the CCD. default to 1340, standard at LNCMI-G. Also 1024 for InGaAs camera.
     
     """
     # Extract the spectra.
     col_1, col_2 = np.loadtxt(folder+file+'.txt', unpack=True, comments='Frame')
 
-    number_of_steps = int(np.floor(len(col_1)/CCD_nb_pixel))
-    #number_of_steps = int(abs((final_val - init_val)/step) + 1)
-    step = 1 if step is None else step
-    if init_val is not None and final_val is None:
-        init_val = 0 if init_val is None else init_val
-        if final_val is None:
+    if pvalues is not None:
+        number_of_steps = len(pvalues)
+        param_values = pvalues
+    else:
+        number_of_steps = int(np.floor(len(col_1)/CCD_nb_pixel))
+        #number_of_steps = int(abs((final_val - init_val)/step) + 1)
+        step = 1 if step is None else step
+        if init_val is not None and final_val is None:
+            init_val = 0 if init_val is None else init_val
+            if final_val is None:
+                final_val = init_val + (number_of_steps-1)*step
+        elif final_val is not None and init_val is None:
+            final_val = 0 if final_val is None else final_val
+            if init_val is None:
+                init_val = final_val - (number_of_steps-1)*step
+        elif init_val is None and final_val is None:
+            init_val = 0
             final_val = init_val + (number_of_steps-1)*step
-    elif final_val is not None and init_val is None:
-        final_val = 0 if final_val is None else final_val
-        if init_val is None:
-            init_val = final_val - (number_of_steps-1)*step
-    elif init_val is None and final_val is None:
-        init_val = 0
-        final_val = init_val + (number_of_steps-1)*step 
 
-    param_values = np.linspace(init_val, final_val, number_of_steps)
+        param_values = np.linspace(init_val, final_val, number_of_steps)
         
     # Reshape.
     col_1 = np.reshape(col_1, (number_of_steps, CCD_nb_pixel))
@@ -1628,7 +1776,7 @@ def df_from_sweep(folder, file, parameter_name, init_val=None, final_val=None, s
     return df
 
 
-def plot_df(df, columns=None, row_selection=None, range_selection=None, ax=None, transf_func=None, **kwargs):
+def plot_df(df, columns=None, row_selection=None, range_selection=None, ax=None, transf_func=None, increment=0, **kwargs):
     """A simple routine to plot data from dataframe by selecting rows with ``selection``.
     
     Paramaters
@@ -1638,7 +1786,7 @@ def plot_df(df, columns=None, row_selection=None, range_selection=None, ax=None,
     columns: list or tuple of integers/strings.
         The two index or label corresponding to the two columns to plot against each other.
     
-    row_selection : list or slice of indices of rows.
+    row_selection : list or slice of indices of rows. WARNING: tuple won't work.
 
     range_selection : determines the range in x axis to plot the data. Two ways:
         - list of min and max values in x axis unit. Ex: [700, 720] in nm.
@@ -1649,6 +1797,10 @@ def plot_df(df, columns=None, row_selection=None, range_selection=None, ax=None,
     ax : axes on which to plot. Create a new figure and axes if None.
 
     transf_func : function that apply a transformation on ydata before plotting.
+
+    increment : scalar value.
+        Each plot will be vertically shifted by this value. If a transform function is used to
+        modified y values, this increment will be applied afterward.
 
     **kwargs: all additional keyword arguments are passed to the ``plt.plot`` call.
     
@@ -1674,8 +1826,8 @@ def plot_df(df, columns=None, row_selection=None, range_selection=None, ax=None,
         transf_func = lambda x: x
     if ax == None:
         fig, ax = plt.subplots(figsize=(10, 6))
-    for (x, y) in zip(serie_1, serie_2):
-        ax.plot(x[range_selection], transf_func(y[range_selection]), **kwargs)
+    for i, (x, y) in enumerate(zip(serie_1, serie_2)):
+        ax.plot(x[range_selection], np.array(transf_func(y[range_selection])+i*increment), **kwargs)
 
 
 def df_extract(df, **kw_col_values):
@@ -1739,7 +1891,7 @@ def get_popt(result_fit, prefix=None):
     """Helper function to use with lmfit package.
 
     Extract the parameters value from a result of a fit with a lmfit model.
-    With the function curve_fit of the module scipy.optimize, one is use to retrieve the optimal values of
+    With the function curve_fit of the module scipy.optimize, one is used to retrieve the optimal values of
     a parameters with 'popt, pcov' and use them to plot the result. In lmfit, it is not available directly,
     so this functions address this issue.
 
@@ -1791,27 +1943,28 @@ def get_param_stderr(name_param, list_of_results):
 from collections.abc import Iterable
 
 def lmfit_get_values(model_result, parameters) -> list:
-    if isinstance(parameters, Iterable):
+    if isinstance(parameters, str):
+        values = [model_result.params[parameters].value]
+    elif isinstance(parameters, Iterable):
         values = []
         for param in parameters:
             val = model_result.params[param].value
             values.append(val)
-    elif isinstance(parameters, str):
-        values = [model_result.params[parameters].value]
     return values
 
 def lmfit_get_stderrors(model_result, parameters) -> list:
-    if isinstance(parameters, Iterable):
+    if isinstance(parameters, str):
+        values = [model_result.params[parameters].stderr]
+    elif isinstance(parameters, Iterable):
         values = []
         for param in parameters:
             val = model_result.params[param].stderr
             values.append(val)
-    elif isinstance(parameters, str):
-        values = [model_result.params[parameters].stderr]
     return values
 
 def lmfit_savetxt(list_of_result, list_of_variable, params_to_save, path_and_filename, name_variable=None, save_errors=False, **kwargs):
-    """Save to a textfile the selected parameters from lmfit fits.
+    """Save to a textfile the selected parameters from lmfit fits. It is formatted for ``pandas.read_csv(delim_whitespace='\s+')``.
+    If one wants to use with ``numpy.loadtxt``, use here in this function the kwarg: comments='#'.
 
     Parameters
     ----------
@@ -1846,20 +1999,24 @@ def lmfit_savetxt(list_of_result, list_of_variable, params_to_save, path_and_fil
 
     if save_errors:
         stderrors = [lmfit_get_stderrors(result, params_to_save) for result in list_of_result]
-        stderrors = np.transpose(stderrors)
-        data_to_save = tuple([list_of_variable]) + tuple([arr for sublist in zip(values, stderrors) for arr in sublist])
-        data_to_save = np.column_stack(data_to_save)
+        if None not in np.array(stderrors).flatten():
+            stderrors = np.transpose(stderrors)
+            data_to_save = tuple([list_of_variable]) + tuple([arr for sublist in zip(values, stderrors) for arr in sublist])
+            data_to_save = np.column_stack(data_to_save)
+        else:
+            data_to_save = tuple([list_of_variable]) + tuple(values)
+            data_to_save = np.column_stack(data_to_save)
     else:
         data_to_save = tuple([list_of_variable]) + tuple(values)
         data_to_save = np.column_stack(data_to_save)
 
     if not save_errors:
-        header = ("{var} , " + ("{} , "*len(params_to_save))[:~2]).format(var=name_variable, *params_to_save)
+        header = ("{var} " + ("{} "*len(params_to_save))[:~2]).format(var=name_variable, *params_to_save)
     else:
-        header = ("{var} , " + ("{} , stderr_{} , "*len(params_to_save))[:~2]).format(var=name_variable, *np.concatenate([[item]*2 for item in params_to_save]))
+        header = ("{var} " + ("{} stderr_{} "*len(params_to_save))).format(var=name_variable, *np.concatenate([[item]*2 for item in params_to_save]))
 
     path_and_filename = path_and_filename if path_and_filename.endswith('.txt') else path_and_filename + '.txt'
-    np.savetxt(path_and_filename, data_to_save, header=header, fmt='%10f')
+    np.savetxt(path_and_filename, data_to_save, header=header, fmt='%10f', comments='')
 
 
 
