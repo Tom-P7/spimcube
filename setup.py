@@ -4,7 +4,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(name='spimcube',
-      version='1.5.2',
+      version='1.5.3',
       description="This package enables the exploration of datacube of spectra within a GUI interface built on matplotlib and brings a handful of function tools.",
       keywords=['spim', 'datacube', 'hyperspectral, 3D map'],
       long_description=long_description,
